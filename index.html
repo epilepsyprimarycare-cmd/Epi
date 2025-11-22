@@ -152,19 +152,18 @@
             <button class="nav-tab" data-tab="add-patient" id="addPatientTab" aria-selected="false">
                 <i class="fas fa-user-plus"></i> <span data-i18n-key="nav.addPatient">Add Patient</span>
             </button>
-            <button class="nav-tab" data-tab="follow-up" id="followUpTab" aria-selected="false" title="Follow-up"
-                data-i18n-key="nav.followup">
+            <button class="nav-tab" data-tab="follow-up" id="followUpTab" aria-selected="false" title="Follow-up">
                 <i class="fas fa-calendar-check"></i> <span data-i18n-key="nav.followup">Follow-up</span>
             </button>
             <button class="nav-tab" data-tab="management" id="managementTab" aria-selected="false">
                 <i class="fas fa-cogs"></i> <span data-i18n-key="nav.management">Management</span>
             </button>
             <button class="nav-tab" data-tab="referred" id="referredTab" aria-selected="false" style="display:none;"
-                title="Referred Patients" data-i18n-key="nav.referred">
+                title="Referred Patients">
                 <i class="fas fa-user-md"></i> <span data-i18n-key="nav.referred">Referred</span>
             </button>
             <button class="nav-tab" data-tab="stock" id="stockTab" aria-selected="false" style="display:none;"
-                title="Stock Management" data-i18n-key="nav.stock">
+                title="Stock Management">
                 <i class="fas fa-boxes-stacked"></i> <span data-i18n-key="nav.stock">Stock</span>
             </button>
         </nav>
@@ -683,9 +682,8 @@
                                 </div>
                                 <!-- Hindi translation removed; use i18n keys instead -->
                             </label>
-                            <select id="patientLocation" name="patientLocation" required>
-                                <option value="">Select Location</option>
-                            </select>
+                            <input type="text" id="patientLocation" name="patientLocation" list="phcList" required placeholder="Select or type location">
+                            <datalist id="phcList"></datalist>
                         </div>
 
                         <div class="form-group">

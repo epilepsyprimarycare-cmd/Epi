@@ -377,9 +377,14 @@ function initDraftHandlers() {
             const result = await fetchDraft(id);
             hideLoader();
             if (result && result.status === 'success' && result.data) {
-                populatePatientFormWithDraft(result.data);
+                // Switch tab FIRST to ensure form elements are visible/rendered
                 showTab('add-patient', document.querySelector('.nav-tab[data-tab="add-patient"]'));
-                showNotification(window.EpicareI18n ? window.EpicareI18n.translate('draft.loadedSuccess') : 'Draft loaded. Please complete the form and submit.', 'success');
+                
+                // Small delay to allow tab switch and DOM updates to complete
+                setTimeout(() => {
+                    populatePatientFormWithDraft(result.data);
+                    showNotification(window.EpicareI18n ? window.EpicareI18n.translate('draft.loadedSuccess') : 'Draft loaded. Please complete the form and submit.', 'success');
+                }, 100);
             } else {
                 showNotification(result && result.message ? result.message : (window.EpicareI18n ? window.EpicareI18n.translate('draft.loadFailed') : 'Failed to load draft'), 'error');
             }

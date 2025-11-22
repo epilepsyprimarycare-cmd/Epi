@@ -149,8 +149,8 @@ async function loadAllAnalytics() {
     try {
         showLoadingState();
         
-        // Load data in parallel
-        const [seizureData, adherenceData, referralData, outcomesData, statusData, ageData, ageOfOnsetData] = await Promise.all([
+        // Load data in parallel using allSettled to prevent one failure from blocking all charts
+        const results = await Promise.allSettled([
             loadSeizureFrequencyAnalytics(),
             loadMedicationAdherenceAnalytics(),
             loadReferralAnalytics(),
@@ -160,14 +160,21 @@ async function loadAllAnalytics() {
             loadAgeOfOnsetDistributionAnalytics()
         ]);
         
+        // Helper to get data or null if failed
+        const getData = (result, name) => {
+            if (result.status === 'fulfilled') return result.value;
+            console.error(`Failed to load ${name}:`, result.reason);
+            return null; // Render functions handle null/empty data gracefully
+        };
+
         // Render charts
-        renderSeizureFrequencyChart(seizureData);
-        renderMedicationAdherenceChart(adherenceData);
-        renderReferralAnalyticsChart(referralData);
-        renderPatientOutcomesChart(outcomesData);
-        renderPatientStatusAnalyticsChart(statusData);
-        renderAgeDistributionChart(ageData);
-        renderAgeOfOnsetDistributionChart(ageOfOnsetData);
+        renderSeizureFrequencyChart(getData(results[0], 'Seizure Frequency'));
+        renderMedicationAdherenceChart(getData(results[1], 'Medication Adherence'));
+        renderReferralAnalyticsChart(getData(results[2], 'Referral Analytics'));
+        renderPatientOutcomesChart(getData(results[3], 'Patient Outcomes'));
+        renderPatientStatusAnalyticsChart(getData(results[4], 'Patient Status'));
+        renderAgeDistributionChart(getData(results[5], 'Age Distribution'));
+        renderAgeOfOnsetDistributionChart(getData(results[6], 'Age of Onset'));
         
     } catch (error) {
         console.error('Error loading analytics:', error);

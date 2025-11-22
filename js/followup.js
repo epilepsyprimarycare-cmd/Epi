@@ -4008,23 +4008,62 @@ function generateSideEffectChecklist(patient, checklistContainerId, otherContain
             return;
         }
 
-        // Build checklist
-        const html = meds.map((drug, idx) => {
-            const key = `adverse-${idx}-${encodeURIComponent(drug)}`;
-            const effects = window.sideEffectData && window.sideEffectData[drug] ? window.sideEffectData[drug] : [];
-            const hint = effects.length ? `<div class="side-effect-hint">${effects.join('; ')}</div>` : '';
-            return `
-                <div class="checklist-item">
-                    <label>
-                        <input type="checkbox" class="adverse-effect" id="${key}" data-drug="${escapeHtml(drug)}" value="${otherCheckboxValue || 'followUp'}">
-                        ${escapeHtml(drug)}
-                    </label>
-                    ${hint}
-                </div>
-            `;
-        }).join('');
+        // Collect all relevant side effects from the prescribed drugs
+        const relevantEffects = new Set();
+        meds.forEach(drug => {
+            // Find matching drug in sideEffectData (case-insensitive partial match)
+            const drugName = String(drug).toLowerCase();
+            const baseDrugKey = Object.keys(window.sideEffectData || {}).find(key => 
+                drugName.includes(key.toLowerCase())
+            );
 
-        container.innerHTML = html;
+            if (baseDrugKey && window.sideEffectData[baseDrugKey]) {
+                window.sideEffectData[baseDrugKey].forEach(effect => relevantEffects.add(effect));
+            }
+        });
+
+        if (relevantEffects.size === 0) {
+            container.innerHTML = '<div class="no-medications">No specific side effects found for these medications. Please use "Other" if needed.</div>';
+        } else {
+            // Build checklist of side effects
+            const html = Array.from(relevantEffects).sort().map((effect, idx) => {
+                const key = `adverse-effect-${idx}`;
+                return `
+                    <div class="checklist-item">
+                        <label>
+                            <input type="checkbox" class="adverse-effect" id="${key}" value="${escapeHtml(effect)}">
+                            ${escapeHtml(effect)}
+                        </label>
+                    </div>
+                `;
+            }).join('');
+            container.innerHTML = html;
+        }
+
+        // Add "Other" option
+        const otherDiv = document.createElement('div');
+        otherDiv.className = 'checklist-item';
+        otherDiv.innerHTML = `
+            <label>
+                <input type="checkbox" class="adverse-effect" id="adverse-effect-other" value="Other">
+                Other (please specify)
+            </label>
+        `;
+        container.appendChild(otherDiv);
+
+        // Handle "Other" toggle
+        const otherCheckbox = otherDiv.querySelector('input');
+        if (otherCheckbox) {
+            otherCheckbox.addEventListener('change', function() {
+                if (otherContainer) {
+                    otherContainer.style.display = this.checked ? 'block' : 'none';
+                    if (!this.checked && otherInput) {
+                        otherInput.value = '';
+                    }
+                }
+            });
+        }
+
     } catch (err) {
         console.error('generateSideEffectChecklist error:', err);
     }

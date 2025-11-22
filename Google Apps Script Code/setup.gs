@@ -36,7 +36,7 @@ function createSpreadsheetStructure() {
       'UpdateWeightAge', 'CurrentWeight', 'CurrentAge', 'WeightAgeUpdateReason',
       'WeightAgeUpdateNotes', 'AdverseEffects', 'SignificantEvent', 'DateOfDeath',
       'CauseOfDeath', 'FollowUpMethod', 'hormonalContraception', 'irregularMenses',
-      'weightGain', 'catamenialPattern'
+      'weightGain', 'catamenialPattern', 'Comorbidities'
     ];
     updateSheetHeaders(sheet, followUpHeaders);
 

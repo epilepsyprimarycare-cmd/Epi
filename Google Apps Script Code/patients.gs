@@ -177,7 +177,10 @@ function updatePatientEpilepsyType(patientId, newType, userEmail = 'unknown') {
     
     // Find column indices
     const idCol = header.indexOf('ID');
-    const epilepsyTypeCol = header.indexOf('EpilepsyType');
+    let epilepsyTypeCol = header.indexOf('EpilepsyType');
+    if (epilepsyTypeCol === -1) {
+      epilepsyTypeCol = header.indexOf('epilepsyType');
+    }
     const classificationHistoryCol = header.indexOf('ClassificationHistory');
     
     // Create ClassificationHistory column if it doesn't exist

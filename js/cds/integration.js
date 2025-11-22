@@ -763,7 +763,11 @@ class CDSIntegration {
     followUp.drugDoseVerification = pickFirst('DrugDoseVerification', 'drugDoseVerification') || null;
 
     // Derive Step 3 frequency/adherence normalization per v1.2
-    const lastFollowUpISO = followUp.followUpDate || pickFirst('LastFollowUpDate', 'lastFollowUpDate', 'lastVisitDate');
+    // For daysSinceLast calculation, we specifically want the PREVIOUS visit date, not the current one.
+    // If followUp.followUpDate is present, it might be the current date (if explicitly set) or previous (if from patient record).
+    // To be safe, we prefer LastFollowUpDate from the source if available, as that reliably indicates history.
+    const lastFollowUpISO = pickFirst('LastFollowUpDate', 'lastFollowUpDate', 'lastVisitDate') || followUp.followUpDate;
+    
     const baselineRaw = epilepsy.baselineFrequency || epilepsy.seizureFrequency || pickFirst('baselineFreqLabel');
     const baselineCategory = normalizeFrequencyLabel(baselineRaw) || null;
     const currentCategory = computeFrequencyFromSeizureCount(followUp.seizuresSinceLastVisit, lastFollowUpISO) || null;
@@ -779,14 +783,19 @@ class CDSIntegration {
       }
     }
 
+    // Calculate days since last visit
+    const daysSinceLast = (lastFollowUpISO ? (Math.min(365, Math.max(1, Math.round((new Date() - new Date(lastFollowUpISO)) / (24*60*60*1000))))) : null);
+    console.log('CDS Integration: Calculated daysSinceLast:', daysSinceLast, 'from lastFollowUpISO:', lastFollowUpISO);
+
     // attach followUp only if any field present
     if (Object.keys(followUp).some(k => followUp[k] !== null && followUp[k] !== '' && followUp[k] !== false)) {
       patientContext.followUp = {
         ...followUp,
+        daysSinceLastVisit: daysSinceLast, // Explicitly provide for backend
         step3: {
           seizureCount: Number(followUp.seizuresSinceLastVisit) || 0,
           lastFollowUpISO: lastFollowUpISO || null,
-          daysSinceLast: (lastFollowUpISO ? (Math.min(365, Math.max(1, Math.round((new Date() - new Date(lastFollowUpISO)) / (24*60*60*1000))))) : null),
+          daysSinceLast: daysSinceLast,
           currentFrequency: currentCategory || 'UNKNOWN',
           baselineFrequency: baselineCategory || 'UNKNOWN',
           adherence: adherenceCanonical || 'UNKNOWN',

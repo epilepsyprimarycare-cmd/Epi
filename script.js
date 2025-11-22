@@ -118,7 +118,7 @@ if (typeof window !== 'undefined') {
 
 // PHC Dropdown IDs - used across the application
 const PHC_DROPDOWN_IDS = [
-    'patientLocation',
+    // 'patientLocation', // Now handled via datalist 'phcList'
     'phcFollowUpSelect',
     'seizureTrendPhcFilter',
     'procurementPhcFilter',
@@ -3751,7 +3751,7 @@ function renderFollowUpTrendChart() {
     if (phcFilterElement && phcFilterElement.value) {
         selectedPhc = phcFilterElement.value;
     } else {
-        console.warn('followUpTrendPhcFilter element not found or no value, using "All" as default');
+        // console.warn('followUpTrendPhcFilter element not found or no value, using "All" as default');
     }
 
     // 2. Normalize PHC strings for case-insensitive matching
@@ -5339,6 +5339,11 @@ function exportMonthlyFollowUpsCSV() {
 
             // Enrich with patient details
             const patient = patientMap.get(String(f.PatientID)) || {};
+            
+            // Exclude draft, inactive, or non-epilepsy patients
+            if (patient.PatientStatus === 'Draft' || patient.PatientStatus === 'Inactive') return;
+            if (NON_EPILEPSY_DIAGNOSES.includes((patient.Diagnosis || '').toLowerCase())) return;
+
             const name = patient.PatientName || patient.Name || '';
             const phone = patient.Phone || patient.Contact || '';
             const phc = patient.PHC || '';
@@ -5449,6 +5454,10 @@ function exportMonthlyFollowUpStatusCSV() {
         const rows = [];
 
         allPatients.forEach(patient => {
+            // Exclude draft, inactive, or non-epilepsy patients
+            if (patient.PatientStatus === 'Draft' || patient.PatientStatus === 'Inactive') return;
+            if (NON_EPILEPSY_DIAGNOSES.includes((patient.Diagnosis || '').toLowerCase())) return;
+
             const row = {
                 'Patient ID': patient.ID || '',
                 'Patient Name': patient.PatientName || patient.Name || '',
@@ -5957,6 +5966,18 @@ function populatePHCDropdowns(phcNames) {
 
     console.log('populatePHCDropdowns: Finished populating all dropdowns');
 
+    // Also populate the phcList datalist for the patientLocation input
+    const phcList = document.getElementById('phcList');
+    if (phcList) {
+        phcList.innerHTML = '';
+        phcNames.forEach(phcName => {
+            const option = document.createElement('option');
+            option.value = phcName;
+            phcList.appendChild(option);
+        });
+        console.log('populatePHCDropdowns: Populated phcList datalist with', phcNames.length, 'options');
+    }
+
     // Check dropdown states immediately after population
     checkDropdownStates();
 
@@ -6093,7 +6114,10 @@ function populateAAMCentersDatalist(centers) {
     centers.forEach(center => {
         if (center.name) {
             const option = document.createElement('option');
-            option.value = center.name;
+            // Format: "Center Name — PHC Name" (if PHC exists)
+            const phcSuffix = center.phc ? ` — ${center.phc}` : '';
+            option.value = center.name + phcSuffix;
+            
             // Add additional info as data attributes for potential future use
             option.setAttribute('data-phc', center.phc || '');
             option.setAttribute('data-nin', center.nin || '');
@@ -6656,7 +6680,7 @@ function renderAdherenceTrendChart() {
 }
 
 // Function to render treatment status summary table
-function renderTreatmentSummaryTable() {
+function renderTreatmentSummaryTable_OLD() {
     const phcFilterElement = document.getElementById('treatmentSummaryPhcFilter');
     if (!phcFilterElement) {
         console.warn('treatmentSummaryPhcFilter element not found, using "All" as default');
@@ -7712,9 +7736,21 @@ async function downloadAllPatientsCsv() {
             showNotification('No patient data loaded.', 'warning');
             return;
         }
-        const rows = window.patientData;
+        
+        // Filter out draft, inactive, and non-epilepsy patients
+        const rows = window.patientData.filter(patient => {
+            if (patient.PatientStatus === 'Draft' || patient.PatientStatus === 'Inactive') return false;
+            if (NON_EPILEPSY_DIAGNOSES.includes((patient.Diagnosis || '').toLowerCase())) return false;
+            return true;
+        });
+
+        if (rows.length === 0) {
+            showNotification('No active epilepsy patients found for export.', 'warning');
+            return;
+        }
+
         const csv = arrayToCsv(rows);
-    triggerCsvDownload((typeof formatDateForFilename === 'function') ? `AllPatients_${formatDateForFilename(new Date())}.csv` : 'AllPatients.csv', csv);
+        triggerCsvDownload((typeof formatDateForFilename === 'function') ? `AllPatients_${formatDateForFilename(new Date())}.csv` : 'AllPatients.csv', csv);
         showNotification('Patient CSV downloaded.', 'success');
     } catch (e) {
         showNotification('Failed to export patients: ' + e.message, 'error');

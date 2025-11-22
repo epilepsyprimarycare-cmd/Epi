@@ -182,6 +182,14 @@ function completeFollowUp(patientId, followUpData) {
     } else if (returnToPhcVal && (String(returnToPhcVal).toLowerCase() === 'yes' || String(returnToPhcVal).toLowerCase() === 'true')) {
       sheet.getRange(rowIndex, patientStatusCol + 1).setValue('Follow-up');
       Logger.log(`Updated patient ${patientId} status to 'Follow-up'`);
+    } else {
+      // Check for New -> Follow-up transition
+      // If status is 'New' and no other significant event occurred, transition to 'Follow-up'
+      var currentStatus = values[rowIndex - 1][patientStatusCol];
+      if (String(currentStatus).trim() === 'New') {
+        sheet.getRange(rowIndex, patientStatusCol + 1).setValue('Follow-up');
+        Logger.log(`Updated patient ${patientId} status from 'New' to 'Follow-up'`);
+      }
     }
     // If none of the above, the status remains unchanged.
   }

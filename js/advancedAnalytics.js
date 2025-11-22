@@ -331,13 +331,26 @@ function renderSeizureFrequencyChart(data) {
     const ctx = document.getElementById('seizureFrequencyChart');
     if (!ctx) return;
     
+    const container = ctx.parentElement;
+    let noDataMsg = container.querySelector('.no-data-message');
+
     // Handle case where data might be undefined or empty
     if (!data || !Array.isArray(data) || data.length === 0) {
-        ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
-        const container = ctx.parentElement;
-            container.innerHTML = `<div class="text-center p-4">${window.EpicareI18n ? window.EpicareI18n.translate('analytics.noSeizureData') : 'No seizure frequency data available'}</div>`;
+        ctx.style.display = 'none';
+        if (!noDataMsg) {
+            noDataMsg = document.createElement('div');
+            noDataMsg.className = 'no-data-message text-center p-4';
+            noDataMsg.innerHTML = window.EpicareI18n ? window.EpicareI18n.translate('analytics.noSeizureData') : 'No seizure frequency data available';
+            container.appendChild(noDataMsg);
+        } else {
+            noDataMsg.style.display = 'block';
+        }
         return;
     }
+    
+    // Data exists
+    ctx.style.display = 'block';
+    if (noDataMsg) noDataMsg.style.display = 'none';
     
     // Destroy existing chart and remove Chart.js monitor nodes
     if (chartInstances.seizureFrequency) {
@@ -432,13 +445,26 @@ function renderMedicationAdherenceChart(data) {
     const ctx = document.getElementById('medicationAdherenceChart');
     if (!ctx) return;
     
+    const container = ctx.parentElement;
+    let noDataMsg = container.querySelector('.no-data-message');
+
     // Handle case where data might be undefined or empty
     if (!data || typeof data !== 'object' || Object.keys(data).length === 0) {
-        ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
-        const container = ctx.parentElement;
-        container.innerHTML = '<div class="text-center p-4">No medication adherence data available</div>';
+        ctx.style.display = 'none';
+        if (!noDataMsg) {
+            noDataMsg = document.createElement('div');
+            noDataMsg.className = 'no-data-message text-center p-4';
+            noDataMsg.innerHTML = window.EpicareI18n ? window.EpicareI18n.translate('analytics.noAdherenceData') : 'No medication adherence data available';
+            container.appendChild(noDataMsg);
+        } else {
+            noDataMsg.style.display = 'block';
+        }
         return;
     }
+    
+    // Data exists
+    ctx.style.display = 'block';
+    if (noDataMsg) noDataMsg.style.display = 'none';
     
     // Destroy existing chart and remove Chart.js monitor nodes
     if (chartInstances.medicationAdherence) {
@@ -493,6 +519,9 @@ function renderReferralAnalyticsChart(data) {
     const ctx = document.getElementById('referralAnalyticsChart');
     if (!ctx) return;
     
+    const container = ctx.parentElement;
+    let noDataMsg = container.querySelector('.no-data-message');
+
     // Destroy existing chart and remove Chart.js monitor nodes
     if (chartInstances.referralAnalytics) {
         chartInstances.referralAnalytics.destroy();
@@ -504,11 +533,21 @@ function renderReferralAnalyticsChart(data) {
     
     // Handle case where data might be undefined or empty
     if (!data || typeof data !== 'object' || !data.monthlyTrends || !Array.isArray(data.monthlyTrends) || data.monthlyTrends.length === 0) {
-        ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
-        const container = ctx.parentElement;
-        container.innerHTML = '<div class="text-center p-4">No referral analytics data available</div>';
+        ctx.style.display = 'none';
+        if (!noDataMsg) {
+            noDataMsg = document.createElement('div');
+            noDataMsg.className = 'no-data-message text-center p-4';
+            noDataMsg.innerHTML = 'No referral analytics data available';
+            container.appendChild(noDataMsg);
+        } else {
+            noDataMsg.style.display = 'block';
+        }
         return;
     }
+    
+    // Data exists
+    ctx.style.display = 'block';
+    if (noDataMsg) noDataMsg.style.display = 'none';
     
     const monthlyData = data.monthlyTrends;
     const labels = monthlyData.map(item => item.month);
@@ -561,6 +600,9 @@ function renderPatientOutcomesChart(data) {
     const ctx = document.getElementById('patientOutcomesChart');
     if (!ctx) return;
     
+    const container = ctx.parentElement;
+    let noDataMsg = container.querySelector('.no-data-message');
+
     // Destroy existing chart and remove Chart.js monitor nodes
     if (chartInstances.patientOutcomes) {
         chartInstances.patientOutcomes.destroy();
@@ -572,11 +614,21 @@ function renderPatientOutcomesChart(data) {
     
     // Handle case where data might be undefined or empty
     if (!data || typeof data !== 'object' || !data.seizureControl || typeof data.seizureControl !== 'object' || Object.keys(data.seizureControl).length === 0) {
-        ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
-        const container = ctx.parentElement;
-        container.innerHTML = '<div class="text-center p-4">No patient outcomes data available</div>';
+        ctx.style.display = 'none';
+        if (!noDataMsg) {
+            noDataMsg = document.createElement('div');
+            noDataMsg.className = 'no-data-message text-center p-4';
+            noDataMsg.innerHTML = 'No patient outcomes data available';
+            container.appendChild(noDataMsg);
+        } else {
+            noDataMsg.style.display = 'block';
+        }
         return;
     }
+    
+    // Data exists
+    ctx.style.display = 'block';
+    if (noDataMsg) noDataMsg.style.display = 'none';
     
     // Focus on seizure control data
     const seizureControlData = data.seizureControl;
@@ -625,6 +677,9 @@ function renderPatientStatusAnalyticsChart(data) {
     const ctx = document.getElementById('patientStatusAnalyticsChart');
     if (!ctx) return;
     
+    const container = ctx.parentElement;
+    let noDataMsg = container.querySelector('.no-data-message');
+
     // Destroy existing chart and remove Chart.js monitor nodes
     if (chartInstances.patientStatusAnalytics) {
         chartInstances.patientStatusAnalytics.destroy();
@@ -636,11 +691,21 @@ function renderPatientStatusAnalyticsChart(data) {
     
     // Handle case where data might be undefined or empty
     if (!data || typeof data !== 'object' || Object.keys(data).length === 0) {
-        ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
-        const container = ctx.parentElement;
-        container.innerHTML = '<div class="text-center p-4">No patient status data available</div>';
+        ctx.style.display = 'none';
+        if (!noDataMsg) {
+            noDataMsg = document.createElement('div');
+            noDataMsg.className = 'no-data-message text-center p-4';
+            noDataMsg.innerHTML = 'No patient status data available';
+            container.appendChild(noDataMsg);
+        } else {
+            noDataMsg.style.display = 'block';
+        }
         return;
     }
+    
+    // Data exists
+    ctx.style.display = 'block';
+    if (noDataMsg) noDataMsg.style.display = 'none';
     
     const labels = Object.keys(data);
     const chartData = Object.values(data).map(item => item.count);
@@ -685,6 +750,9 @@ function renderAgeDistributionChart(data) {
     const ctx = document.getElementById('ageDistributionChart');
     if (!ctx) return;
     
+    const container = ctx.parentElement;
+    let noDataMsg = container.querySelector('.no-data-message');
+
     // Destroy existing chart and remove Chart.js monitor nodes
     if (chartInstances.ageDistribution) {
         chartInstances.ageDistribution.destroy();
@@ -696,11 +764,21 @@ function renderAgeDistributionChart(data) {
     
     // Handle case where data might be undefined or empty
     if (!data || !Array.isArray(data) || data.length === 0) {
-        ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
-        const container = ctx.parentElement;
-        container.innerHTML = '<div class="text-center p-4">No age distribution data available</div>';
+        ctx.style.display = 'none';
+        if (!noDataMsg) {
+            noDataMsg = document.createElement('div');
+            noDataMsg.className = 'no-data-message text-center p-4';
+            noDataMsg.innerHTML = 'No age distribution data available';
+            container.appendChild(noDataMsg);
+        } else {
+            noDataMsg.style.display = 'block';
+        }
         return;
     }
+    
+    // Data exists
+    ctx.style.display = 'block';
+    if (noDataMsg) noDataMsg.style.display = 'none';
     
     const labels = data.map(item => item.ageGroup);
     const chartData = data.map(item => item.count);
@@ -790,6 +868,9 @@ function renderAgeOfOnsetDistributionChart(data) {
     const ctx = document.getElementById('ageOfOnsetDistributionChart');
     if (!ctx) return;
     
+    const container = ctx.parentElement;
+    let noDataMsg = container.querySelector('.no-data-message');
+
     // Destroy existing chart and remove Chart.js monitor nodes
     if (chartInstances.ageOfOnsetDistribution) {
         chartInstances.ageOfOnsetDistribution.destroy();
@@ -801,11 +882,21 @@ function renderAgeOfOnsetDistributionChart(data) {
     
     // Handle case where data might be undefined or empty
     if (!data || !Array.isArray(data) || data.length === 0) {
-        ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
-        const container = ctx.parentElement;
-        container.innerHTML = '<div class="text-center p-4">No age of onset data available</div>';
+        ctx.style.display = 'none';
+        if (!noDataMsg) {
+            noDataMsg = document.createElement('div');
+            noDataMsg.className = 'no-data-message text-center p-4';
+            noDataMsg.innerHTML = 'No age of onset data available';
+            container.appendChild(noDataMsg);
+        } else {
+            noDataMsg.style.display = 'block';
+        }
         return;
     }
+    
+    // Data exists
+    ctx.style.display = 'block';
+    if (noDataMsg) noDataMsg.style.display = 'none';
     
     const labels = data.map(item => item.ageGroup);
     const chartData = data.map(item => item.count);
@@ -915,13 +1006,8 @@ function hideLoadingState() {
     const loadingElements = document.querySelectorAll('.analytics-loading');
     loadingElements.forEach(el => el.remove());
     
-    const charts = ['seizureFrequencyChart', 'medicationAdherenceChart', 'referralAnalyticsChart', 'patientOutcomesChart', 'patientStatusAnalyticsChart', 'ageDistributionChart', 'ageOfOnsetDistributionChart'];
-    charts.forEach(chartId => {
-        const container = document.getElementById(chartId);
-        if (container) {
-            container.style.display = 'block';
-        }
-    });
+    // We do not force display:block here anymore. 
+    // The render functions are responsible for showing the canvas if data exists.
 }
 
 /**

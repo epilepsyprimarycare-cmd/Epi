@@ -961,28 +961,19 @@ function applyAdverseEffectsPathway(result, patientContext, epilepsyClassificati
       );
     }
     
-    // Filter by adverse effects to avoid similar side effect profiles
-    alternativeMedications = filterMedicationsByAdverseEffects(
-      alternativeMedications,
-      adverseEffects,
-      knowledgeBase
-    );
-    
-    if (alternativeMedications.length > 0) {
-      result.treatmentRecommendations.push({
-  id: "alternative_medication",
-  type: "medication",
-  severity: "high",
-  priority: 1,
-  text: `ALTERNATIVE: Switch to: ${alternativeMedications.join(', ')} due to adverse effects.`,
-        rationale: "Alternative medications with different side effect profiles.",
-        nextSteps: [
-          `Switch to: ${alternativeMedications.join(', ')}.`,
-          "Monitor for new adverse effects."
-        ],
-        references: ["FDA ASM Guidance 2023"]
-      });
-    }
+    result.treatmentRecommendations.push({
+      id: "alternative_medication",
+      type: "medication",
+      severity: "high",
+      priority: 1,
+      text: `ALTERNATIVE: Switch to: ${alternativeMedications.join(', ')} due to adverse effects.`,
+      rationale: "Alternative medications with different side effect profiles.",
+      nextSteps: [
+        `Switch to: ${alternativeMedications.join(', ')}.`,
+        "Monitor for new adverse effects."
+      ],
+      references: ["FDA ASM Guidance 2023"]
+    });
   } else if (severityLevel === "moderate") {
     // For moderate effects, suggest dose reduction
     result.treatmentRecommendations.push({
@@ -1103,6 +1094,7 @@ function applyRoutineFollowUpPathway(result, patientContext, epilepsyClassificat
  * @param {Array} specialPopulations Special populations
  * @param {Array} currentMedications Current medications
  * @param {Object} knowledgeBase CDS knowledge base
+ * @param {Object} patientContext Patient context for additional checks
  */
 function applySpecialPopulationConsiderations(result, specialPopulations, currentMedications, knowledgeBase, patientContext) {
   // For each special population, add specific considerations
@@ -1772,7 +1764,7 @@ function ensureKBRules(kb) {
       },
       pregnancyValproate: {
         id: 'pregnancyValproate',
-        title: 'Valproate in pregnancy risk',
+                                                         title: 'Valproate in pregnancy risk',
         description: 'Valproate is teratogenic and should be avoided in women of childbearing potential when possible',
         severity: 'critical',
         enabled: true
@@ -2083,6 +2075,7 @@ function assessDoseAdequacyGated(patientContext, derived, result) {
             const dayMax = adultDosing.max_mg_day || adultDosing.max_mg_day || null;
 
             if (!minMgKg && (dayMin || dayTarget) && weight) {
+              // Use dayMin if present else fallback to dayTarget
               const baseDay = dayMin || dayTarget;
               minMgKg = baseDay / weight;
             }
@@ -2097,660 +2090,6 @@ function assessDoseAdequacyGated(patientContext, derived, result) {
         let findings = [];
         if (minMgKg && mgPerKg <= minMgKg) findings.push('below_mg_per_kg');
         if (maxMgKg && mgPerKg > maxMgKg) findings.push('above_mg_per_kg');
-
-        // Check adult max dose for elderly
-        if (derived.isElderly && drugInfo.dosing.adult.max_mg_kg_day && mgPerKg > drugInfo.dosing.adult.max_mg_kg_day) {
-          findings.push('above_adult_max');
-        }
-
-        if (findings.length > 0) {
-          // Still record dose findings but suppress optimization recommendations
-          result.doseFindings.push({
-            drug: medName,
-            dailyMg: parsedDailyMg,
-            mgPerKg: mgPerKg,
-            findings: findings,
-            recommendation: 'Dose assessment available but optimization recommendations suppressed due to adherence concerns.',
-            adherenceGated: true
-          });
-        }
-      }
-    }
-  });
-
-  // Add adherence-focused dose guidance
-  if (result.doseFindings.some(f => f.findings.includes('below_mg_per_kg'))) {
-    result.prompts.push({
-      id: 'dose_assessment_adherence_gated',
-      severity: 'info',
-      text: 'Dose assessment shows potential subtherapeutic levels, but optimization recommendations are suppressed pending adherence improvement.',
-      rationale: 'Dose changes should not be considered until adherence is optimized.',
-      nextSteps: ['Address adherence barriers first', 'Reassess dosing after adherence is confirmed'],
-      ref: 'adherence_gating'
-    });
-  }
-}
-
-/**
- * Flag critical triggers for dashboard alerts
- * @param {Object} result - Result object to modify
- */
-function flagDashboardCriticalAlerts(result) {
-  // Check for HIGH severity warnings that should trigger dashboard alerts
-  const hasCriticalSafety = result.warnings.some(w =>
-    ['pregnancyValproate', 'valproateHepatotoxicityPancreatitis', 'carbamazepineDermatologicHematologic'].includes(w.id)
-  );
-
-  const hasBreakthroughAdherence = result.warnings.some(w =>
-    w.id === 'breakthrough_poor_adherence_gating'
-  );
-
-  const hasDrugResistant = result.warnings.some(w =>
-    w.id === 'referralDrugResistantEpilepsy'
-  );
-
-  const hasStatusEpilepticus = result.warnings.some(w =>
-    w.id === 'referralStatusEpilepticus'
-  );
-
-  const hasProgressiveDeterioration = result.warnings.some(w =>
-    w.id === 'referralProgressiveDeterioration'
-  );
-
-  const hasSevereAdverseEffects = result.warnings.some(w =>
-    w.id === 'referralSevereRefractoryAdverseEffects'
-  );
-
-  // Flag for dashboard if any critical triggers are present
-  result.meta.dashboardCriticalAlert = hasCriticalSafety || hasBreakthroughAdherence ||
-                                     hasDrugResistant || hasStatusEpilepticus ||
-                                     hasProgressiveDeterioration || hasSevereAdverseEffects;
-}
-
-/**
- * Enforce output structure and order
- * @param {Object} result - Result object
- * @returns {Object} Enforced result structure
- */
-function enforceOutputStructure(result) {
-  // Ensure proper ordering: warnings (HIGH) first, then prompts (MEDIUM/INFO), then doseFindings
-  result.warnings = result.warnings || [];
-  result.prompts = result.prompts || [];
-  result.doseFindings = result.doseFindings || [];
-
-  // Sort warnings by severity (critical > high > medium > info)
-  const severityOrder = { 'critical': 0, 'high': 1, 'medium': 2, 'info': 3 };
-  result.warnings.sort((a, b) => (severityOrder[a.severity] || 3) - (severityOrder[b.severity] || 3));
-
-  // Sort prompts by severity
-  result.prompts.sort((a, b) => (severityOrder[a.severity] || 3) - (severityOrder[b.severity] || 3));
-
-  return result;
-}
-function deriveClinicalAttributes(patientContext) {
-  var derived = (function(pc) {
-    const demo = pc.demographics || {};
-    const epilepsy = pc.epilepsy || {};
-    const regimen = pc.regimen || {};
-    const flags = pc.clinicalFlags || {};
-
-    const age = demo.age || 0;
-    const medications = Array.isArray(regimen.medications) ? regimen.medications : [];
-
-    return {
-      epilepsyClassified: epilepsy.epilepsyType && epilepsy.epilepsyType !== 'unknown',
-  isElderly: age >= 65,
-  // v1.2: child is defined as age < 18
-  isChild: age < 18,
-  // Adolescents: 12-17 years inclusive
-  isAdolescent: age >= 12 && age <= 17,
-      reproductivePotential: demo.reproductivePotential === true || (demo.gender === 'female' && age >= 12 && age <= 50),
-      isPregnant: demo.pregnancyStatus === 'pregnant' || demo.pregnancyStatus === true,
-      asmCount: medications.length,
-      hasEnzymeInducer: medications.some(med => {
-        const name = (typeof med === 'string' ? med : med.name || '').toLowerCase();
-        return ['carbamazepine', 'phenytoin', 'phenobarbital'].some(inducer => name.includes(inducer));
-      }),
-      hasSedative: medications.some(med => {
-        const name = (typeof med === 'string' ? med : med.name || '').toLowerCase();
-        return ['phenobarbital', 'clobazam'].some(sedative => name.includes(sedative));
-      })
-    };
-  })(patientContext);
-
-  return derived;
-}
-
-
-
-
-
-/**
- * Parse dose string like "500 mg BD" into structured data
- * @param {string} doseStr - Dose string
- * @returns {Object} { strength: number, frequency: number, dailyMg: number }
- */
-function parseDose(doseStr) {
-  if (!doseStr || typeof doseStr !== 'string') return null;
-
-  const str = doseStr.toLowerCase().trim();
-  // Match patterns like "500 mg BD", "200mg TDS", "10 mg OD", or single-entry "3000 mg" or "3000 mg/day"
-  const match = str.match(/(\d+(?:\.\d+)?)(?:\s*mg(?:\s*\/day)?)(?:\s*(od|bd|tds|qds?|qid|tid|hs|nocte|daily|twice|thrice))?/i);
-  if (!match) return null;
-
-  const strength = parseFloat(match[1]);
-  const freqStr = match[2] ? match[2].toLowerCase() : null;
-
-  let frequency = 1;
-  switch (freqStr) {
-    case 'od':
-    case 'daily':
-    case 'hs':
-    case 'nocte':
-      frequency = 1;
-      break;
-    case 'bd':
-    case 'twice':
-      frequency = 2;
-      break;
-    case 'tds':
-    case 'tid':
-    case 'thrice':
-      frequency = 3;
-      break;
-    case 'qds':
-    case 'qid':
-      frequency = 4;
-      break;
-    default:
-      frequency = 1;
-  }
-
-  return {
-    strength: strength,
-    frequency: frequency,
-    dailyMg: strength * frequency
-  };
-}
-
-/**
- * Normalize patient context to ensure v1.2 structured format
- * @param {Object} patientData - Raw patient data
- * @returns {Object} Normalized patient context
- */
-function normalizePatientContext(patientData) {
-  if (!patientData) return null;
-
-  // If already in v1.2 format, parse doses and return
-  if (patientData.demographics && patientData.epilepsy && patientData.regimen) {
-    // Parse doses in medications
-    if (patientData.regimen.medications && Array.isArray(patientData.regimen.medications)) {
-      patientData.regimen.medications = patientData.regimen.medications.map(med => {
-        if (typeof med === 'string') return med;
-        if (med.dose && !med.dailyMg) {
-          const parsed = parseDose(med.dose);
-          if (parsed) {
-            return { ...med, dailyMg: parsed.dailyMg, strength: parsed.strength, frequency: parsed.frequency };
-          }
-        }
-        return med;
-      });
-    }
-    return patientData;
-  }
-
-  // Convert legacy flat format to v1.2 structure
-  const medications = patientData.medications || patientData.regimen?.medications || [];
-  const parsedMeds = medications.map(med => {
-    if (typeof med === 'string') return med;
-    if (med.dose && !med.dailyMg) {
-      const parsed = parseDose(med.dose);
-      if (parsed) {
-        return { ...med, dailyMg: parsed.dailyMg, strength: parsed.strength, frequency: parsed.frequency };
-      }
-    }
-    return med;
-  });
-
-  return {
-    patientId: patientData.patientId || patientData.id,
-    patientName: patientData.patientName,
-    demographics: {
-      age: patientData.age || patientData.demographics?.age,
-      gender: patientData.gender || patientData.demographics?.gender,
-      weightKg: patientData.weightKg || patientData.weight || patientData.demographics?.weightKg,
-      pregnancyStatus: patientData.pregnancyStatus || patientData.demographics?.pregnancyStatus || 'unknown',
-      reproductivePotential: patientData.reproductivePotential || patientData.demographics?.reproductivePotential
-    },
-    epilepsy: {
-      epilepsyType: patientData.epilepsyType || patientData.epilepsy?.epilepsyType || 'unknown',
-      seizureFrequency: patientData.seizureFrequency || patientData.epilepsy?.seizureFrequency,
-      baselineFrequency: patientData.baselineFrequency || patientData.epilepsy?.baselineFrequency
-    },
-    regimen: {
-      medications: parsedMeds
-    },
-    clinicalFlags: patientData.clinicalFlags || {
-      renalFunction: patientData.renalFunction || 'unknown',
-      hepaticFunction: patientData.hepaticFunction || 'unknown',
-      adherencePattern: canonicalizeAdherence(
-        patientData.adherencePattern ||
-        patientData.clinicalFlags?.adherencePattern ||
-        patientData.adherence ||
-        patientData.treatmentAdherence ||
-        patientData.TreatmentAdherence ||
-        patientData.clinicalFlags?.TreatmentAdherence ||
-        'unknown'
-      ),
-      adverseEffects: patientData.adverseEffects || '',
-      failedTwoAdequateTrials: patientData.failedTwoAdequateTrials || false
-    },
-    followUp: {
-      seizuresSinceLastVisit: patientData.seizuresSinceLastVisit || patientData.followUp?.seizuresSinceLastVisit || 0,
-      daysSinceLastVisit: patientData.daysSinceLastVisit || patientData.followUp?.daysSinceLastVisit || 30,
-      adherence: canonicalizeAdherence(
-        patientData.adherence ||
-        patientData.treatmentAdherence ||
-        patientData.TreatmentAdherence ||
-        patientData.followUp?.adherence ||
-        patientData.followUp?.treatmentAdherence ||
-        patientData.followUp?.TreatmentAdherence ||
-        patientData.clinicalFlags?.adherencePattern ||
-        patientData.clinicalFlags?.TreatmentAdherence ||
-        'unknown'
-      )
-    },
-    // Additional women's health and follow-up flags
-    hormonalContraception: patientData.hormonalContraception || patientData.demographics?.hormonalContraception || false,
-    irregularMenses: patientData.irregularMenses || patientData.clinicalFlags?.irregularMenses || false,
-    weightGain: patientData.weightGain || patientData.clinicalFlags?.weightGain || false,
-    catamenialPattern: patientData.catamenialPattern || (patientData.followUp && patientData.followUp.catamenialPattern) || false
-  };
-}
-
-/**
- * Canonicalize free-text adherence labels to a small set of standard values used by CDS
- * @param {string} val
- * @returns {string} canonical adherence label
- */
-function canonicalizeAdherence(val) {
-  // Deterministic mapping centered on UI labels with a small, safe synonym whitelist
-  if (val === null || val === undefined) return 'unknown';
-  var v = String(val).toString().trim();
-  if (v === '') return 'unknown';
-
-  // Prefer exact label matches (case-insensitive)
-  var lower = v.toLowerCase();
-  if (lower === 'always take') return 'Always take';
-  if (lower === 'occasionally miss') return 'Occasionally miss';
-  if (lower === 'frequently miss') return 'Frequently miss';
-  if (lower === 'completely stopped medicine') return 'Completely stopped medicine';
-
-  // Small, explicit synonym whitelist for backward compatibility
-  // Map short/common variants to the canonical UI labels
-  if (/\b(stop|stopped|not taking|stopped medicine)\b/i.test(v)) return 'Completely stopped medicine';
-  if (/\b(frequent|frequently|often miss|miss often|many misses)\b/i.test(v)) return 'Frequently miss';
-  if (/\b(occasion|sometimes|intermittent|rarely miss|miss occasionally)\b/i.test(v)) return 'Occasionally miss';
-  if (/\b(always|perfect|adherent|no misses|never miss)\b/i.test(v)) return 'Always take';
-
-  // If nothing matched, return explicit unknown to avoid leaking unexpected free-text
-  return 'unknown';
-}
-
-// Post-process mapped medicines and add structured data issues helper
-function enrichMedicationMappings(patientContext) {
-  try {
-    if (!patientContext || !patientContext.regimen || !Array.isArray(patientContext.regimen.medications)) return patientContext;
-    const kb = getCDSKnowledgeBase();
-    const issues = [];
-    patientContext.regimen.medications = patientContext.regimen.medications.map(med => {
-      const medObj = (typeof med === 'string') ? { name: med } : Object.assign({}, med);
-      const mappedKey = mapMedicationToFormulary(medObj.name, kb);
-      medObj.mappedKey = mappedKey || null;
-      medObj.mappedName = mappedKey ? (kb.formulary[mappedKey].name || mappedKey) : null;
-      medObj.structured = !!mappedKey;
-      if (!mappedKey) {
-        issues.push({ type: 'unmapped_medication', value: medObj.name });
-      }
-      return medObj;
-    });
-    patientContext.structuredDataIssues = issues;
-    return patientContext;
-  } catch (err) {
-    console.warn('enrichMedicationMappings failed:', err);
-    return patientContext;
-  }
-}
-
-/**
- * Apply universal safety guardrails (highest priority)
- * @param {Object} patientContext - Normalized patient context
- * @param {Object} derived - Derived clinical attributes
- * @param {Object} result - Result object to modify
- */
-function applySafetyGuardrails(patientContext, derived, result) {
-  const demo = patientContext.demographics;
-  const medications = patientContext.regimen?.medications || [];
-
-  // Pregnancy + Valproate (HIGH) - Updated for v1.2: trigger for reproductivePotential
-  if (derived.reproductivePotential && medications.some(med => {
-    const name = (typeof med === 'string' ? med : med.name || '').toLowerCase();
-    return name.includes('valproate');
-  })) {
-    result.warnings.push({
-      id: 'pregnancyValproate',
-      severity: 'high',
-      text: 'CRITICAL: Avoid valproate in women of reproductive age.',
-      rationale: 'Valproate is highly teratogenic. Use only if no alternatives and with strict pregnancy prevention.',
-      nextSteps: ['Switch to safer ASM (e.g., Levetiracetam).', 'If unavoidable, implement Pregnancy Prevention Programme.'],
-      ref: '6'
-    });
-  }
-
-  // Enzyme inducer + reproductive potential (UPGRADED: HIGH)
-  if (derived.reproductivePotential && derived.hasEnzymeInducer) {
-    result.prompts.push({
-      id: 'enzymeInducerContraception',
-      severity: 'high',
-      text: 'CAUTION: Enzyme-inducing ASM reduces contraceptive efficacy.',
-      rationale: 'Carbamazepine, Phenytoin, Phenobarbital lower hormonal contraceptive effectiveness.',
-      nextSteps: ['Counsel on alternative contraception (IUD, barrier).'],
-      ref: '5'
-    });
-  }
-
-  // Sedative load (MEDIUM)
-  if (derived.hasSedative) {
-    result.prompts.push({
-      id: 'sedativeLoad',
-      severity: 'medium',
-      text: 'CAUTION: Sedative ASM increases fall risk.',
-      rationale: 'Phenobarbital/Clobazam cause sedation, cognitive slowing, and increase fall risk.',
-      nextSteps: ['Assess for daytime sleepiness.', 'Monitor for falls, especially in elderly.'],
-      ref: '1'
-    });
-  }
-
-  // Folic acid supplementation (INFO)
-  if (derived.reproductivePotential) {
-    result.prompts.push({
-      id: 'folicAcidSupplementation',
-      severity: 'info',
-      text: 'Recommend folic acid 5mg daily.',
-      rationale: 'Reduces risk of birth defects for women on ASM.',
-      nextSteps: ['Prescribe folic acid 5mg daily.'],
-      ref: '28'
-    });
-  }
-
-  // Valproate hepatotoxicity/pancreatitis (HIGH)
-  if (medications.some(med => {
-    const name = (typeof med === 'string' ? med : med.name || '').toLowerCase();
-    return name.includes('valproate');
-  })) {
-    result.warnings.push({
-      id: 'valproateHepatotoxicityPancreatitis',
-      severity: 'high',
-      text: 'CRITICAL: Warn about valproate liver/pancreas risk.',
-      rationale: 'Valproate can cause fatal hepatotoxicity and pancreatitis.',
-      nextSteps: ['Counsel on warning signs: vomiting, abdominal pain, jaundice.', 'Stop medication if suspected.'],
-      ref: '9'
-    });
-  }
-
-  // Hepatic impairment caution
-  const hepaticFunction = patientContext.clinicalFlags?.hepaticFunction;
-  if (hepaticFunction === 'Impaired' && medications.some(med => {
-    const name = (typeof med === 'string' ? med : med.name || '').toLowerCase();
-    return ['valproate', 'phenytoin', 'carbamazepine', 'phenobarbital'].some(drug => name.includes(drug));
-  })) {
-    result.prompts.push({
-      id: 'hepaticImpairmentCaution',
-      severity: 'medium',
-      text: 'Caution: Hepatic impairment with ASM.',
-      rationale: 'Valproate, Phenytoin, Carbamazepine, Phenobarbital need dose adjustment in liver disease.',
-      nextSteps: ['Prefer Levetiracetam if possible.', 'Monitor liver function.'],
-      ref: 'hepatic'
-    });
-  }
-
-  // Carbamazepine dermatologic and hematologic risks (HIGH)
-  if (medications.some(med => {
-    const name = (typeof med === 'string' ? med : med.name || '').toLowerCase();
-    return name.includes('carbamazepine');
-  })) {
-    result.warnings.push({
-      id: 'carbamazepineDermatologicHematologic',
-      severity: 'high',
-      text: 'CRITICAL: Counsel on SJS/TEN and infection risk for Carbamazepine.',
-      rationale: 'Carbamazepine can cause severe skin reactions (SJS/TEN) and bone marrow suppression.',
-      nextSteps: ['Counsel to stop medication and seek urgent care for rash, fever, mouth sores, bleeding, or infection.'],
-      ref: '4'
-    });
-  }
-}
-
-/**
- * Evaluate Breakthrough Seizures & Adherence (Inputs from Follow-up Form)
- * @param {Object} patientContext - Normalized patient context
- * @param {Object} derived - Derived clinical attributes
- * @param {Object} result - Result object to modify
- */
-function evaluateBreakthroughSeizures(patientContext, derived, result) {
-  // Extract follow-up data
-  const followUp = patientContext.followUp || {};
-  const seizuresCount = followUp.seizuresSinceLastVisit || patientContext.seizuresSinceLastVisit || 0;
-  const daysSinceLastVisit = followUp.daysSinceLastVisit || 30; // Default to 30 days if not provided
-  var treatmentAdherence = followUp.adherence || followUp.treatmentAdherence || patientContext.clinicalFlags?.adherencePattern || 'unknown';
-  // Ensure canonical adherence label (defensive)
-  treatmentAdherence = canonicalizeAdherence(treatmentAdherence);
-
-  // Only evaluate if we have seizure count data from follow-up
-  if (seizuresCount === undefined || seizuresCount === null) {
-    return; // No follow-up seizure data available
-  }
-
-  // Step 3.1: Compute Current Seizure Frequency
-  let currentFreq = 'Seizure-free';
-  if (seizuresCount > 0) {
-    const meanInterval = daysSinceLastVisit / seizuresCount;
-    if (meanInterval <= 1) {
-      currentFreq = 'Daily';
-    } else if (meanInterval <= 7) {
-      currentFreq = 'Weekly';
-    } else if (meanInterval <= 30) {
-      currentFreq = 'Monthly';
-    } else if (meanInterval <= 365) {
-      currentFreq = 'Yearly';
-    } else {
-      currentFreq = '< Yearly';
-    }
-  }
-
-  // Step 3.2: Determine Worsening
-  // Get baseline frequency from patient record
-  const baselineFreqStr = patientContext.epilepsy?.baselineFrequency || patientContext.epilepsy?.seizureFrequency || 'unknown';
-  const baselineFreqRank = getSeizureFrequencyRank(baselineFreqStr);
-  const currentFreqRank = getSeizureFrequencyRank(currentFreq);
-
-  const worsened = currentFreqRank > baselineFreqRank;
-  let magnitude = 'none';
-
-  if (worsened) {
-    const rankDifference = currentFreqRank - baselineFreqRank;
-    if (rankDifference >= 2 || currentFreq === 'Daily') {
-      magnitude = 'severe';
-    } else {
-      magnitude = 'mild_moderate';
-    }
-  }
-
-  // Step 3.3: Actions upon Worsening
-  if (worsened) {
-    // Flag patient on dashboard
-    const severity = magnitude === 'severe' ? 'high' : 'medium';
-
-    // Check adherence first
-    const poorAdherence = ['Frequently miss', 'Completely stopped medicine'].includes(treatmentAdherence);
-
-    if (poorAdherence) {
-      // HIGH severity: Prioritize adherence
-      result.warnings.push({
-        id: 'breakthrough_poor_adherence',
-        severity: 'high',
-        text: `Significant seizure worsening detected BUT poor adherence reported (${treatmentAdherence}). Focus on adherence counseling, identify barriers, simplify schedule if possible. Reassess in 4 weeks before changing ASMs.`,
-        rationale: 'Poor adherence is the most likely cause of breakthrough seizures. Address adherence before considering medication changes.',
-        nextSteps: [
-          'Counsel on importance of consistent medication taking',
-          'Identify and address adherence barriers (cost, side effects, forgetfulness)',
-          'Consider regimen simplification or reminders',
-          'Reassess seizure control in 4 weeks'
-        ],
-        ref: 'adherence'
-      });
-    } else {
-      // Adherence is good/occasional - focus on treatment optimization
-      if (magnitude === 'severe') {
-        result.warnings.push({
-          id: 'breakthrough_severe_worsening',
-          severity: 'high',
-          text: `Severe worsening: Current frequency ${currentFreq} (baseline: ${baselineFreqStr}). Verify dose adequacy and consider prompt uptitration if sub-therapeutic, or change regimen (add/switch). Consider specialist referral if ≥2 ASMs tried or response inadequate.`,
-          rationale: 'Severe breakthrough seizures require urgent treatment optimization.',
-          nextSteps: [
-            'Verify all ASM doses are at optimal levels',
-            'Consider immediate dose uptitration if sub-therapeutic',
-            'Evaluate for add-on therapy or medication switch',
-            'Consider specialist referral if multiple treatment failures'
-          ],
-          ref: 'severe_worsening'
-        });
-      } else {
-        // Mild/Moderate worsening
-        result.prompts.push({
-          id: 'breakthrough_mild_worsening',
-          severity: 'medium',
-          text: `Worsening seizures: Current frequency ${currentFreq} (baseline: ${baselineFreqStr}). Check dose adequacy and consider uptitration if sub-therapeutic, or adding an adjunct (e.g., Clobazam) if on monotherapy and dose tolerated.`,
-          rationale: 'Mild to moderate breakthrough seizures may respond to dose optimization or adjunctive therapy.',
-          nextSteps: [
-            'Review ASM dosing for adequacy',
-            'Consider dose uptitration if below optimal range',
-            'Consider adding adjunctive therapy if monotherapy at optimal dose',
-            'Monitor response closely'
-          ],
-          ref: 'mild_worsening'
-        });
-      }
-    }
-  } else {
-    // No worsening - proceed to other steps
-    if (seizuresCount === 0) {
-      result.prompts.push({
-        id: 'seizure_free_period',
-        severity: 'info',
-        text: 'Patient reports seizure freedom since last visit. Continue current management.',
-        rationale: 'Seizure freedom indicates good current control.',
-        nextSteps: ['Continue current ASM regimen', 'Schedule routine follow-up'],
-        ref: 'seizure_free'
-      });
-    }
-  }
-}
-
-/**
- * Get seizure frequency rank for comparison
- * @param {string} frequency - Seizure frequency description
- * @returns {number} Rank value (higher = worse)
- */
-function getSeizureFrequencyRank(frequency) {
-  if (!frequency || typeof frequency !== 'string') return 0;
-  const freq = frequency.toLowerCase().trim();
-
-  // Normalize common synonyms and map to ranks
-  // Rank order: "Seizure-free"=0, "< Yearly"=1, "Yearly"=2, "Monthly"=3, "Weekly"=4, "Daily"=5
-  if (freq.includes('seizure-free') || freq.includes('seizure free') || freq === '0' || freq === 'none') return 0;
-  if (/(<\s*yearly|less than yearly|rare|rarely|very rare)/.test(freq)) return 1;
-  if (/\byearly\b|\bper year\b|\byearly\b/.test(freq)) return 2;
-  if (/monthly|per month|\bmonth\b/.test(freq)) return 3;
-  if (/weekly|per week|\bweek\b/.test(freq)) return 4;
-  if (/daily|per day|\bday\b/.test(freq)) return 5;
-
-  // Fallback: if numeric frequencies like "2/day" or "3 per week" appear, try to interpret
-  var m = freq.match(/(\d+)\s*\/?\s*(day|d|week|w|month|m|year|y)/);
-  if (m) {
-    var n = Number(m[1]);
-    var unit = m[2];
-    if (unit.startsWith('d')) return 5;
-    if (unit.startsWith('w')) return 4;
-    if (unit.startsWith('m')) return 3;
-    if (unit.startsWith('y')) return 2;
-  }
-
-  // Default to moderate (monthly) if unknown
-  return 3;
-}
-
-/**
- * Assess dose adequacy and adherence
- * @param {Object} patientContext - Normalized patient context
- * @param {Object} derived - Derived clinical attributes
- * @param {Object} result - Result object to modify
- */
-function assessDoseAdequacy(patientContext, derived, result) {
-  const medications = patientContext.regimen?.medications || [];
-  const weight = patientContext.demographics?.weightKg;
-
-  medications.forEach(med => {
-    const medName = (typeof med === 'string' ? med : med.name || '').toLowerCase();
-    const dose = (typeof med === 'string' ? '' : med.dose || '');
-    const dailyMg = (typeof med === 'string' ? null : med.dailyMg);
-
-    // Use parsed dailyMg if available, otherwise parse dose
-    let parsedDailyMg = dailyMg;
-    if (!parsedDailyMg && dose) {
-      const parsed = parseDose(dose);
-      if (parsed) {
-        parsedDailyMg = parsed.dailyMg;
-      }
-    }
-
-    if (parsedDailyMg && weight) {
-      const mgPerKg = parsedDailyMg / weight;
-
-      // Get formulary dosing guidelines from KB
-      const kb = getCDSKnowledgeBase();
-      const formulary = kb && kb.formulary ? kb.formulary : {};
-      const drugInfo = formulary[medName];
-
-      if (drugInfo) {
-        const dosing = derived.isElderly ? (drugInfo.dosing && drugInfo.dosing.adult ? drugInfo.dosing.adult : drugInfo.dosing) : (derived.isChild ? (drugInfo.dosing && drugInfo.dosing.pediatric ? drugInfo.dosing.pediatric : drugInfo.dosing) : (drugInfo.dosing && drugInfo.dosing.adult ? drugInfo.dosing.adult : drugInfo.dosing));
-        let minMgKg = dosing.min_mg_kg_day;
-        let maxMgKg = dosing.max_mg_kg_day;
-
-        // Fallback: if mg/kg/day thresholds are not present, try to derive from mg/day thresholds
-        if ((!minMgKg || !maxMgKg) && drugInfo.dosing) {
-          try {
-            const adultDosing = drugInfo.dosing.adult || drugInfo.dosing;
-            // Prefer explicit target or start values, otherwise use target as best-effort
-            const dayMin = adultDosing.min_mg_day || adultDosing.start_mg_day || adultDosing.target_mg_day || null;
-            const dayTarget = adultDosing.target_mg_day || adultDosing.target_mg_day || null;
-            const dayMax = adultDosing.max_mg_day || adultDosing.max_mg_day || null;
-
-            if (!minMgKg && (dayMin || dayTarget) && weight) {
-              // Use dayMin if present else fallback to dayTarget
-              const baseDay = dayMin || dayTarget;
-              minMgKg = baseDay / weight;
-            }
-            if (!maxMgKg && dayMax && weight) {
-              maxMgKg = dayMax / weight;
-            }
-          } catch (e) {
-            // Non-fatal: if fallback fails, leave min/max as undefined
-          }
-        }
-
-        let findings = [];
-  if (minMgKg && mgPerKg <= minMgKg) findings.push('below_mg_per_kg');
-  if (maxMgKg && mgPerKg > maxMgKg) findings.push('above_mg_per_kg');
 
         // Check adult max dose for elderly
         if (derived.isElderly && drugInfo.dosing.adult.max_mg_kg_day && mgPerKg > drugInfo.dosing.adult.max_mg_kg_day) {
@@ -3336,7 +2675,7 @@ function applyPolytherapyPathway(epilepsyType, medications, derived, result, pat
   // Enhanced escalation logic for breakthrough seizures on polytherapy
   var seizureCount = 0;
   try {
-    seizureCount = Number(patientContext?.followUp?.seizuresSinceLastVisit || patientContext?.seizuresSinceLastVisit || 0);
+    seizureCount = Number(patientContext?.followUp?.seizuresSinceLastVisit || patientContext.seizuresSinceLastVisit || 0);
   } catch (err) {
     seizureCount = 0;
   }
@@ -3351,7 +2690,7 @@ function applyPolytherapyPathway(epilepsyType, medications, derived, result, pat
       result.warnings.push({
         id: 'polytherapy_breakthrough_subtherapeutic',
         severity: 'high',
-        text: `Breakthrough seizures on polytherapy with subtherapeutic dosing detected. Optimize all medication doses before considering regimen changes.`,
+        text: `Breakthrough seizures on polytherapy with subtherapeutic dosing detected. Prioritize dose optimization before considering regimen changes.`,
         rationale: 'Subtherapeutic doses in polytherapy may be contributing to breakthrough seizures. All medications should be titrated to target levels first.',
         nextSteps: ['Review and optimize doses of all ASMs to target levels', 'Titrate gradually and reassess seizure control in 4-8 weeks', 'Consider drug interactions that may affect dosing']
       });
@@ -3423,6 +2762,15 @@ function assessReferralNeeds(patientContext, derived, result) {
         ref: 'pregnancy_polytherapy',
         rationale: 'Complex regimens in pregnancy require specialist oversight.'
       });
+    } else {
+      // v1.2: General referral for any pregnancy
+      referralReasons.push({
+        type: 'maternal_fetal_medicine',
+        reason: 'Pregnancy in epilepsy patient',
+        priority: 'high',
+        ref: 'pregnancy_general',
+        rationale: 'All pregnancies in epilepsy patients benefit from specialist oversight.'
+      });
     }
   }
 
@@ -3444,7 +2792,36 @@ function assessReferralNeeds(patientContext, derived, result) {
       var doseFindings = result.doseFindings || [];
       var anySubther = doseFindings.some(d => d.isSubtherapeutic);
       var allAtMaxOrTarget = doseFindings.length > 0 && doseFindings.every(d => d.isAtMax || d.isAtTarget);
-      if (asmCount >= 2 && seizureCountNow > 0 && !anySubther && allAtMaxOrTarget) {
+      
+      // v1.2: Worsening + 2 drugs max dose -> Referral
+      // v1.2: Worsening + 3 drugs -> Referral
+      
+      // Check for worsening (re-using logic from evaluateBreakthroughSeizures would be ideal, but simple check here)
+      // We assume if seizureCountNow > 0 and baseline was low, it's worsening. 
+      // Or we can check if evaluateBreakthroughSeizures flagged it? 
+      // result.warnings has breakthrough warnings.
+      const hasBreakthroughWarning = result.warnings.some(w => w.id.includes('breakthrough'));
+      
+      if (hasBreakthroughWarning) {
+         if (asmCount >= 3) {
+            referralReasons.push({
+              type: 'tertiary_epilepsy_center',
+              reason: 'Worsening seizures on 3+ medications',
+              priority: 'urgent',
+              ref: 'worsening_3_drugs',
+              rationale: 'Persistent seizures on multiple medications indicates drug resistance.'
+            });
+         } else if (asmCount >= 2 && allAtMaxOrTarget) {
+            referralReasons.push({
+              type: 'tertiary_epilepsy_center',
+              reason: 'Worsening seizures on 2+ medications at max/target dose',
+              priority: 'urgent',
+              ref: 'worsening_2_drugs_max',
+              rationale: 'Failure of 2+ optimized regimens warrants specialist referral.'
+            });
+         }
+      } else if (asmCount >= 2 && seizureCountNow > 0 && !anySubther && allAtMaxOrTarget) {
+        // Existing fallback logic
         referralReasons.push({
           type: 'tertiary_epilepsy_center',
           reason: 'Suspected drug-resistant epilepsy (multiple ASMs at target doses with ongoing seizures)',
@@ -3701,7 +3078,7 @@ function scanHighRiskPatients() {
       const reproductive = (gender === 'female' || gender === 'f') && age >= 12 && age <= 50;
       const onValproate = meds.some(m => /valproate|depakote|epilim/i.test(m));
       if (reproductive && onValproate) {
-        // Find recent followups for this patient to see seizure control and dates
+        // Find recent follow-ups for this patient to see seizure control and dates
         const patientFollowUps = followUps.filter(f => String(f.PatientID || f.PatientId || f.patientId) === String(p.ID || p.id || ''));
         const recentFU = patientFollowUps.sort((a,b) => new Date(b.FollowUpDate || b.SubmissionDate || b.SubmissionDate || 0) - new Date(a.FollowUpDate || a.SubmissionDate || a.SubmissionDate || 0))[0];
         // Find PHC stock for Levetiracetam availability
@@ -3721,7 +3098,7 @@ function scanHighRiskPatients() {
       // 2) Sub-therapeutic dosing: require weight and daily mg in med string
       if (weight && meds.length > 0) {
         meds.forEach(m => {
-          const parsed = parseDose((typeof m === 'string') ? m : (m.dose || m.dosage || ''));
+          const parsed = parseDose((typeof m === 'string' ? m : (m.dose || m.dosage || '')));
           const medName = typeof m === 'string' ? m : (m.name || m.medication || '');
           if (parsed && parsed.dailyMg) {
             const canonical = mapMedicationToFormulary(medName, kb);
@@ -3904,6 +3281,7 @@ function evaluateAddPatientCDS(patientData) {
     const hasPhenytoin = medications.some(med =>
       (med.name || '').toLowerCase().includes('phenytoin') ||
       (med.name || '').toLowerCase().includes('dilantin')
+   
     );
 
     if (hasPhenytoin) {

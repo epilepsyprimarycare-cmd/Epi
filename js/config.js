@@ -6,7 +6,7 @@
 // DEPLOYMENT CONFIGURATION
 // =====================================================
 // UPDATE THIS URL WHEN DEPLOYING TO A NEW GOOGLE APPS SCRIPT:
-const DEPLOYMENT_URL = 'https://script.google.com/macros/s/AKfycbzMMnJJuQMCnY8qctBtA3MvM8nl8WL1Zp5v1MwndxbP3iIoSMv2ji7fEY_xSQ7-k7s/exec';
+const DEPLOYMENT_URL = 'https://script.google.com/macros/s/AKfycbwkTWLSO2aVDsrLW-Aphc_RgZmZ_xRiMq8YUezf1V5TjfG3-5S2VHgkYxJuIqmUevYY/exec';
 
 // =====================================================
 // GLOBAL APPLICATION CONFIGURATION

@@ -5554,7 +5554,7 @@ async function fetchPHCNames() {
 
         let activePHCNames = [];
 
-        if (result.status === 'success' && Array.isArray(result.data)) {
+        if (result && result.status === 'success' && Array.isArray(result.data)) {
             // Use the pre-filtered active PHC names
             activePHCNames = result.data.filter(name => name);
             console.log('fetchPHCNames: Successfully got active PHC names:', activePHCNames);
@@ -5576,7 +5576,7 @@ async function fetchPHCNames() {
                         }
                         console.log('fetchPHCNames: Response from PHC endpoint:', result);
 
-            if (result.status === 'success' && Array.isArray(result.data)) {
+            if (result && result.status === 'success' && Array.isArray(result.data)) {
                 // Handle both old and new PHC data formats
                 activePHCNames = result.data
                     .filter(phc => {
@@ -5599,7 +5599,8 @@ async function fetchPHCNames() {
 
                 console.log('fetchPHCNames: Processed PHC names:', activePHCNames);
             } else {
-                throw new Error(result.message || 'Failed to fetch PHC names');
+                const errorMsg = (result && result.message) ? result.message : 'Failed to fetch PHC names';
+                throw new Error(errorMsg);
             }
         }
 

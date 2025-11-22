@@ -149,10 +149,8 @@ let charts = {};
 let lastDataFetch = 0;
 const DATA_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
-// Injury tracking with type support
-let selectedInjuries = [];
-let currentInjuryPart = null;
-
+// Injury tracking: selectedInjuries and currentInjuryPart are now managed by js/injury-map.js
+// They are exported to window global scope by that module for access throughout the app
 // Injury map functions are now consolidated in js/injury-map.js module
 // This prevents duplication between SVG-based (new) and legacy implementations
 // Import the consolidated module instead: <script src="js/injury-map.js"></script>

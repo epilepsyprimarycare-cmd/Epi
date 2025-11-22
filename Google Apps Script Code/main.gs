@@ -488,16 +488,9 @@ function doGet(e) {
 }
 
 /**
- * Handle CORS preflight OPTIONS requests
- * Required for browser fetch() calls from GitHub Pages
- */
-function doOptions(e) {
-  return createCorsJsonResponse({ status: 'ok' });
-}
-
-/**
  * Accept POST requests and route actions. Attempts to add CORS headers to responses.
- * Now properly handles CORS with doOptions() support
+ * Note: some browsers send an OPTIONS preflight which Apps Script does not expose a direct handler for; if preflight fails
+ * you may need to use a proxy or send POSTs in form-encoded format to avoid triggering preflight.
  */
 function doPost(e) {
   var result = null;
@@ -1042,12 +1035,11 @@ function doPost(e) {
       var uname = (body && body.username) || (e.parameter && e.parameter.username) || '';
       var pwd = (body && body.password) || (e.parameter && e.parameter.password) || '';
       if (!uname || !pwd) {
-        // SECURITY: Generic error - never reveal if username exists
-        result = { status: 'error', message: 'Invalid username or password' };
+        result = { status: 'error', message: 'Missing credentials' };
       } else {
         var usersSheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(USERS_SHEET_NAME);
         if (!usersSheet) {
-          result = { status: 'error', message: 'Invalid username or password' };
+          result = { status: 'error', message: 'Users sheet not found' };
         } else {
           var values = usersSheet.getDataRange().getValues();
           var headers = values[0] || [];
@@ -1059,7 +1051,7 @@ function doPost(e) {
           var emailCol = headers.findIndex(h => /email/i.test(h));
 
           if (usernameCol === -1 || passwordCol === -1) {
-            result = { status: 'error', message: 'Invalid username or password' };
+            result = { status: 'error', message: 'User sheet has invalid headers' };
           } else {
             var found = null;
               for (var i = 1; i < values.length; i++) {
@@ -1088,13 +1080,12 @@ function doPost(e) {
                 }
 
                 if (sheetUsername === uname && valid) {
-                // SECURITY: Only return minimal data (username, role, phc)
-                // Never expose Name, Email, or other PII in login response
                 found = {
                   Username: sheetUsername,
                   Role: roleCol >= 0 ? (row[roleCol] || '') : '',
-                  PHC: phcCol >= 0 ? (row[phcCol] || '') : ''
-                  // Intentionally excluded: Name, Email, and any other PII
+                  PHC: phcCol >= 0 ? (row[phcCol] || '') : '',
+                  Name: nameCol >= 0 ? (row[nameCol] || '') : '',
+                  Email: emailCol >= 0 ? (row[emailCol] || '') : ''
                 };
                   // If login succeeded with legacy plaintext and no hash present, migrate this user to hashed password
                   if (!storedHash || !storedSalt) {
@@ -1179,21 +1170,12 @@ function doPost(e) {
  */
 function createCorsJsonResponse(obj) {
   try {
-    // Google Apps Script supports setting headers via HtmlOutput
-    // Use HtmlOutput for JSON to leverage header support
-    var jsonStr = JSON.stringify(obj);
-    return ContentService.createTextOutput(jsonStr)
-      .setMimeType(ContentService.MimeType.JSON)
-      .addHeader('Access-Control-Allow-Origin', '*')
-      .addHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-      .addHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-      .addHeader('Access-Control-Max-Age', '86400');
+    // Note: ContentService.TextOutput does not support setting HTTP headers via setHeader.
+    // Attempting to call setHeader causes a runtime error. Return JSON output only.
+    return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
   } catch (e) {
     console.error('createCorsJsonResponse error:', e);
-    var fallback = ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'Response serialization failed' }))
-      .setMimeType(ContentService.MimeType.JSON)
-      .addHeader('Access-Control-Allow-Origin', '*')
-      .addHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    var fallback = ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'Response serialization failed' })).setMimeType(ContentService.MimeType.JSON);
     return fallback;
   }
 }

@@ -422,7 +422,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Fetch PHC names dynamically from backend
-    fetchPHCNames();
+    fetchPHCNames().catch(err => {
+        console.warn('fetchPHCNames failed (expected if backend unavailable):', err.message);
+        // App continues to work with empty PHC list - user can still use the system
+    });
 
     // Initialize draft handlers (if draft.js loaded)
     try { if (window.DraftModule && typeof window.DraftModule.init === 'function') window.DraftModule.init(); } catch (e) { console.warn('DraftModule init error', e); }
@@ -5279,7 +5282,10 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
     // Sync toggle state from server for all roles (so viewer sees correct tabs)
-    syncViewerToggleFromServer();
+    syncViewerToggleFromServer().catch(err => {
+        console.warn('syncViewerToggleFromServer failed (expected if backend unavailable):', err.message);
+        // App continues with default toggle state - not critical for functionality
+    });
     // Advanced Analytics modal wiring
     const openAA = document.getElementById('openAdvancedAnalyticsBtn');
     const closeAA = document.getElementById('advancedAnalyticsClose');

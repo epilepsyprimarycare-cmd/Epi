@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CDS Enhancement Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .test-result { margin: 10px 0; padding: 10px; border-radius: 3px; }
+        .success { background: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
+        .error { background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 3px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>CDS Enhancement Test</h1>
+    <div id="test-results"></div>
+    <div id="cds-debug-logs" style="margin-top:10px; white-space:pre-wrap; font-family:monospace; background:#f7f7f7; padding:10px; border-radius:6px; max-height:300px; overflow:auto;"></div>
+
+    <!-- Load required scripts -->
+    <script src="js/config.js"></script>
+    <script src="js/dose-adequacy.js"></script>
+    <script src="js/cds/integration.js"></script>
+    <script src="js/api/cds-api.js"></script>
+
+    <script>
+        // Test data with structured medication format (simulating our form output)
+        const testPatient = {
+            ID: "TEST001",
+            PatientName: "Test Patient",
+            Age: 25,
+            Gender: "Female",
+            Weight: 60,
+            Medications: "Levetiracetam 500 mg BD; Valproate 300 mg BD",
+            epilepsyType: "focal",
+            pregnancyStatus: "unknown",
+            addictions: "Tobacco"
+        };
+
+        // Override CDS API to return realistic test results and provide config/metadata for initialize()
+        window.cdsApi = {
+            getConfig: async function() {
+                return { enabled: true, kbVersion: '1.2.0' };
+            },
+            getKnowledgeBaseMetadata: async function() {
+                return { version: '1.2.0', specialPopulationInfo: true, treatmentPathwayInfo: true };
+            },
+            logEvents: async function(events) { console.log('Mock logEvents', events); return true; },
+            evaluatePatient: async function(patientContext) {
+                console.log('Test CDS API called with:', patientContext);
+                
+                // Simulate CDS evaluation results
+                const results = {
+                    warnings: [
+                        { id: "valproate_reproductive_warning", severity: "HIGH", text: "Valproate use in women of reproductive age requires pregnancy prevention program enrollment" },
+                        { id: "levetiracetam_dose_check", severity: "INFO", text: "Levetiracetam 500mg BD is within normal range for focal epilepsy" }
+                    ],
+                    prompts: [],
+                    doseFindings: [
+                        {
+                            medication: "Valproate",
+                            currentDose: 600,
+                            recommendedDose: "300-500 mg/day",
+                            status: "high",
+                            reason: "Current dose exceeds recommended maximum for monotherapy"
+                        }
+                    ],
+                    treatmentRecommendations: {
+                        specialConsiderations: [
+                            {
+                                type: "reproductive",
+                                text: "Valproate is contraindicated in women of reproductive potential without pregnancy prevention measures"
+                            }
+                        ]
+                    },
+                    version: "1.2.0"
+                };
+                
+                return results;
+            }
+        };
+
+        // Run tests
+        async function runTests() {
+            const resultsDiv = document.getElementById('test-results');
+            resultsDiv.innerHTML = '<div class="test-section"><h2>Running CDS Enhancement Tests...</h2></div>';
+
+            try {
+                // Test 1: Initialize CDS Integration
+                const cdsIntegration = new CDSIntegration();
+                await cdsIntegration.initialize();
+
+                resultsDiv.innerHTML += '<div class="test-result success">✓ CDS Integration initialized successfully</div>';
+
+                // Test 2a: Show transformed patient context before analysis
+                const transformed = cdsIntegration.transformFollowUpDataToPatientContext(testPatient);
+                resultsDiv.innerHTML += '<div class="test-section"><h3>Transformed Patient Context</h3><pre>' + JSON.stringify(transformed, null, 2) + '</pre></div>';
+
+                // Test 2b: Analyze patient data
+                const analysis = await cdsIntegration.analyzeFollowUpData(testPatient);
+                console.log('Test harness: analysis result', analysis);
+                // print a short summary in the debug logs
+                const dbg = document.getElementById('cds-debug-logs');
+                dbg.textContent += '\n--- Analysis Summary ---\n' + JSON.stringify({ warnings: analysis.warnings?.length || 0, prompts: analysis.prompts?.length || 0, doseFindings: analysis.doseFindings?.length || 0 }, null, 2) + '\n';
+                // display raw analysis for debugging
+                const debugDiv = document.createElement('div');
+                debugDiv.className = 'test-section';
+                debugDiv.innerHTML = '<h3>Debug Analysis Output</h3><pre>' + JSON.stringify(analysis, null, 2) + '</pre>';
+                resultsDiv.appendChild(debugDiv);
+
+                resultsDiv.innerHTML += '<div class="test-result success">✓ Patient analysis completed</div>';
+
+                // Test 3: Check dose findings
+                if (analysis.doseFindings && analysis.doseFindings.length > 0) {
+                    resultsDiv.innerHTML += '<div class="test-result success">✓ Dose findings generated</div>';
+                    resultsDiv.innerHTML += '<div class="test-section"><h3>Dose Findings:</h3><pre>' +
+                        JSON.stringify(analysis.doseFindings, null, 2) + '</pre></div>';
+                } else {
+                    resultsDiv.innerHTML += '<div class="test-result error">✗ No dose findings generated</div>';
+                }
+
+                // Test 4: Check treatment recommendations
+                if (analysis.treatmentRecommendations) {
+                    resultsDiv.innerHTML += '<div class="test-result success">✓ Treatment recommendations generated</div>';
+                    resultsDiv.innerHTML += '<div class="test-section"><h3>Treatment Recommendations:</h3><pre>' +
+                        JSON.stringify(analysis.treatmentRecommendations, null, 2) + '</pre></div>';
+                } else {
+                    resultsDiv.innerHTML += '<div class="test-result error">✗ No treatment recommendations generated</div>';
+                }
+
+                // Test 5: Check for valproate safety warning
+                const hasValproateWarning = analysis.treatmentRecommendations?.specialConsiderations?.some(
+                    sc => sc.text.toLowerCase().includes('valproate') && sc.text.toLowerCase().includes('reproductive')
+                );
+                if (hasValproateWarning) {
+                    resultsDiv.innerHTML += '<div class="test-result success">✓ Valproate safety guardrail working</div>';
+                } else {
+                    resultsDiv.innerHTML += '<div class="test-result error">✗ Valproate safety guardrail not triggered</div>';
+                }
+
+                resultsDiv.innerHTML += '<div class="test-result success">🎉 All CDS enhancement tests completed!</div>';
+
+            } catch (error) {
+                resultsDiv.innerHTML += '<div class="test-result error">✗ Test failed: ' + error.message + '</div>';
+                console.error('Test error:', error);
+            }
+        }
+
+        // Run tests when page loads
+        window.addEventListener('load', runTests);
+    </script>
+</body>
+</html></content>
+<parameter name="filePath">c:\Users\Mayank\Epicare-v4\cds-test.html

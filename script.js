@@ -32,12 +32,7 @@ function initializePatientForm() {
         setupDiagnosisBasedFormControl();
     }
 
-    // Setup injury map if present
-    if (document.getElementById('injuryMap') && typeof initializeInjuryMap === 'function') {
-        initializeInjuryMap();
-    }
-    
-    // Setup injury type modal if present
+    // Setup injury map if present (uses consolidated js/injury-map.js module)
     if (document.getElementById('injury-modal') && typeof initializeInjuryModal === 'function') {
         initializeInjuryModal();
     }
@@ -158,315 +153,20 @@ const DATA_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 let selectedInjuries = [];
 let currentInjuryPart = null;
 
-// Full SVG-based injury map initialization.
-// Finds the inline SVG with id `body-map`, wires pointer/touch/keyboard handlers on parts
-// (elements with an id inside the SVG) and keeps #selected-injuries-list and #injuriesData in sync.
-function initializeInjuryMap() {
-    // Idempotent: don't re-initialize
-    if (initializeInjuryMap._initialized) return;
-
-    const svg = document.getElementById('body-map');
-    const selectedList = document.getElementById('selected-injuries-list');
-    const hiddenInput = document.getElementById('injuriesData');
-    if (!svg) return; // nothing to do
-
-    // Helper: render the selectedInjuries array into the list and hidden input
-    function renderSelectedInjuries() {
-        if (selectedList) {
-            // Create a map of current items for quick diffing
-            const existing = Array.from(selectedList.querySelectorAll('li')).reduce((acc, li) => {
-                const key = li.getAttribute('data-part');
-                if (key) acc[key] = li;
-                return acc;
-            }, {});
-
-            // Add new items
-            selectedInjuries.forEach(part => {
-                if (existing[part]) {
-                    // already present, keep it
-                    delete existing[part];
-                    return;
-                }
-                const li = document.createElement('li');
-                li.textContent = part;
-                li.setAttribute('data-part', part);
-                li.classList.add('adding');
-                const removeBtn = document.createElement('button');
-                removeBtn.type = 'button';
-                removeBtn.className = 'remove-injury';
-                removeBtn.title = `Remove ${part}`;
-                removeBtn.innerHTML = '&times;';
-                removeBtn.addEventListener('click', () => {
-                    // play removal animation
-                    li.classList.add('removing');
-                    setTimeout(() => togglePart(part), 160);
-                });
-                li.appendChild(removeBtn);
-                selectedList.appendChild(li);
-                // allow CSS transition to run
-                requestAnimationFrame(() => {
-                    li.classList.remove('adding');
-                });
-            });
-
-            // Remove items that are no longer present
-            Object.keys(existing).forEach(part => {
-                const li = existing[part];
-                li.classList.add('removing');
-                setTimeout(() => li.remove(), 180);
-            });
-        }
-        if (hiddenInput) hiddenInput.value = JSON.stringify(selectedInjuries);
-    }
-
-    // Find selectable parts inside the SVG: elements with an id (ellipse, rect, polygon, path)
-    const selectable = Array.from(svg.querySelectorAll('ellipse[id], rect[id], polygon[id], path[id], circle[id]'));
-
-    // Toggle by part name (data-name attribute if present, else id)
-    function togglePart(partName) {
-        const idx = selectedInjuries.indexOf(partName);
-        if (idx === -1) {
-            selectedInjuries.push(partName);
-        } else {
-            selectedInjuries.splice(idx, 1);
-        }
-        // Update classes on SVG elements
-        selectable.forEach(el => {
-            const name = el.getAttribute('data-name') || el.id;
-            if (!name) return;
-            if (selectedInjuries.indexOf(name) !== -1) {
-                el.classList.add('selected');
-                el.setAttribute('aria-pressed', 'true');
-            } else {
-                el.classList.remove('selected');
-                el.setAttribute('aria-pressed', 'false');
-            }
-        });
-        renderSelectedInjuries();
-    }
-
-    // Bind handlers for pointer/click/touch and keyboard accessibility
-    selectable.forEach(el => {
-        const name = el.getAttribute('data-name') || el.id;
-        if (!name) return;
-
-        // Make focusable and provide ARIA
-        el.setAttribute('tabindex', '0');
-        el.setAttribute('role', 'button');
-        el.setAttribute('aria-pressed', selectedInjuries.indexOf(name) !== -1 ? 'true' : 'false');
-        el.setAttribute('aria-label', name);
-
-        // Pointer/click handler - open injury type modal
-        el.addEventListener('click', (evt) => {
-            evt.preventDefault();
-            // transient visual tap feedback
-            el.classList.add('tapped');
-            setTimeout(() => el.classList.remove('tapped'), 160);
-            openInjuryModal(name);
-        });
-
-        // Touch: use pointer events where supported; click covers most cases, but ensure touch works
-        el.addEventListener('pointerdown', (evt) => {
-            // Prevent synthetic mouse click double-firing
-            evt.preventDefault();
-        });
-
-        // Keyboard: Enter/Space opens injury type modal
-        el.addEventListener('keydown', (evt) => {
-            if (evt.key === 'Enter' || evt.key === ' ') {
-                evt.preventDefault();
-                openInjuryModal(name);
-            }
-        });
-    });
-
-    // If the form is loaded with existing injuriesData, hydrate selectedInjuries
-    try {
-        if (hiddenInput && hiddenInput.value) {
-            const initial = JSON.parse(hiddenInput.value);
-            if (Array.isArray(initial)) {
-                selectedInjuries = initial.slice();
-            }
-        }
-    } catch (e) {
-        // ignore JSON parse errors
-    }
-
-    // Render initial state
-    togglePart = togglePart; // ensure function is hoisted in this closure (no-op; keeps linter happy)
-    renderSelectedInjuries();
-
-    // Mark initialized
-    initializeInjuryMap._initialized = true;
-}
+// Injury map functions are now consolidated in js/injury-map.js module
+// This prevents duplication between SVG-based (new) and legacy implementations
+// Import the consolidated module instead: <script src="js/injury-map.js"></script>
 
 // ============================================
-// INJURY TYPE SELECTION MODAL FUNCTIONS
+// INJURY TYPE SELECTION MODAL FUNCTIONS - DEPRECATED
+// These functions have been consolidated in js/injury-map.js
 // ============================================
-
-// Open injury type selection modal
-function openInjuryModal(partName) {
-    currentInjuryPart = partName;
-    const modal = document.getElementById('injury-modal');
-    const title = document.getElementById('injury-modal-title');
-    
-    if (modal && title) {
-        title.textContent = `Select Injury Type for ${partName}`;
-        modal.style.display = 'flex';
-        modal.style.alignItems = 'center';
-        modal.style.justifyContent = 'center';
-        modal.style.position = 'fixed';
-        modal.style.top = '0';
-        modal.style.left = '0';
-        modal.style.width = '100%';
-        modal.style.height = '100%';
-        modal.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-        modal.style.zIndex = '10000';
-        
-        // Focus the first injury type button
-        const firstBtn = modal.querySelector('.injury-type-options .btn:first-child');
-        if (firstBtn) {
-            setTimeout(() => firstBtn.focus(), 100);
-        }
-    }
-}
-
-// Close injury type selection modal
-function closeInjuryModal() {
-    const modal = document.getElementById('injury-modal');
-    if (modal) {
-        modal.style.display = 'none';
-        currentInjuryPart = null;
-    }
-}
-
-// Add injury with type to the selected injuries list
-function addInjuryWithType(injuryType) {
-    if (!currentInjuryPart) return;
-    
-    // Check if this part already has an injury
-    const existingIndex = selectedInjuries.findIndex(injury => {
-        return typeof injury === 'object' ? injury.part === currentInjuryPart : injury === currentInjuryPart;
-    });
-    
-    // Remove existing injury for this part if it exists
-    if (existingIndex !== -1) {
-        selectedInjuries.splice(existingIndex, 1);
-    }
-    
-    // Add new injury with type
-    const newInjury = {
-        part: currentInjuryPart,
-        type: injuryType
-    };
-    
-    selectedInjuries.push(newInjury);
-    
-    // Update display and close modal
-    updateInjuryDisplay();
-    closeInjuryModal();
-}
-
-// Update injury display and SVG classes
-function updateInjuryDisplay() {
-    const svg = document.getElementById('body-map');
-    const selectedList = document.getElementById('selected-injuries-list');
-    const hiddenInput = document.getElementById('injuriesData');
-    
-    // Update SVG classes
-    if (svg) {
-        const selectable = Array.from(svg.querySelectorAll('ellipse[id], rect[id], polygon[id], path[id], circle[id]'));
-        selectable.forEach(el => {
-            const name = el.getAttribute('data-name') || el.id;
-            if (!name) return;
-            
-            const hasInjury = selectedInjuries.some(injury => {
-                return typeof injury === 'object' ? injury.part === name : injury === name;
-            });
-            
-            if (hasInjury) {
-                el.classList.add('selected');
-                el.setAttribute('aria-pressed', 'true');
-            } else {
-                el.classList.remove('selected');
-                el.setAttribute('aria-pressed', 'false');
-            }
-        });
-    }
-    
-    // Update selected injuries list
-    if (selectedList) {
-        selectedList.innerHTML = '';
-        selectedInjuries.forEach(injury => {
-            const displayText = typeof injury === 'object' ? `${injury.part} - ${injury.type}` : injury;
-            const li = document.createElement('li');
-            li.textContent = displayText;
-            li.setAttribute('data-part', typeof injury === 'object' ? `${injury.part}-${injury.type}` : injury);
-            
-            const removeBtn = document.createElement('button');
-            removeBtn.type = 'button';
-            removeBtn.className = 'remove-injury';
-            removeBtn.title = `Remove ${displayText}`;
-            removeBtn.innerHTML = '&times;';
-            removeBtn.addEventListener('click', () => {
-                li.classList.add('removing');
-                setTimeout(() => {
-                    const index = selectedInjuries.findIndex(item => {
-                        if (typeof item === 'object' && typeof injury === 'object') {
-                            return item.part === injury.part && item.type === injury.type;
-                        }
-                        return item === injury;
-                    });
-                    
-                    if (index !== -1) {
-                        selectedInjuries.splice(index, 1);
-                        updateInjuryDisplay();
-                    }
-                }, 160);
-            });
-            
-            li.appendChild(removeBtn);
-            selectedList.appendChild(li);
-        });
-    }
-    
-    // Update hidden input
-    if (hiddenInput) {
-        hiddenInput.value = JSON.stringify(selectedInjuries);
-    }
-}
-
-// Initialize injury type modal event listeners
-function initializeInjuryModal() {
-    const modal = document.getElementById('injury-modal');
-    const injuryTypeButtons = document.querySelectorAll('.injury-type-options button[data-type]');
-    
-    if (!modal) return;
-    
-    // Close modal when clicking outside the content
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            closeInjuryModal();
-        }
-    });
-    
-    // Close modal with Escape key
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && modal.style.display !== 'none') {
-            closeInjuryModal();
-        }
-    });
-    
-    // Add click listeners to injury type buttons
-    injuryTypeButtons.forEach(button => {
-        const injuryType = button.getAttribute('data-type');
-        if (injuryType) {
-            button.addEventListener('click', () => {
-                addInjuryWithType(injuryType);
-            });
-        }
-    });
-}
+// Use the functions exported from that module instead:
+// - initializeInjuryMap()
+// - openInjuryModal(partName)
+// - addInjuryWithType(injuryType)
+// - updateInjuryDisplay()
+// - initializeInjuryModal()
 
 // sideEffectData is declared in followup.js
 
@@ -732,10 +432,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize seizure frequency selectors
     initializeSeizureFrequencySelectors();
 
-    // Initialize injury map (supports inline SVG `#body-map` or legacy container `#injuryMap`)
-    if (document.getElementById('body-map') || document.getElementById('injuryMap')) {
-        initializeInjuryMap();
-    }
+    // Injury map initialization is now handled by js/injury-map.js module
+    // The module is loaded in index.html and initializes automatically when DOM contains injury elements
+    // No need to call initializeInjuryMap() here - it's idempotent and already initialized by the module
 
     // Setup diagnosis-based form control
     setupDiagnosisBasedFormControl();
@@ -1455,99 +1154,120 @@ document.querySelectorAll('.role-option').forEach(option => {
     e.preventDefault();
     showLoader('Verifying credentials...');
 
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
+    const usernameEl = document.getElementById('username');
+    const passwordEl = document.getElementById('password');
+    const username = usernameEl.value.trim();
+    const password = passwordEl.value;
     const selectedRole = document.querySelector('.role-option.active').dataset.role;
 
-        try {
-            // Use a secure server-side login endpoint to avoid exposing all user data to the client
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-            const payload = new URLSearchParams();
-            payload.append('action', 'login');
-            payload.append('username', username);
-            payload.append('password', password);
-            payload.append('role', selectedRole);
-
-            const res = await fetch(API_CONFIG.MAIN_SCRIPT_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-                body: payload.toString(),
-                signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const result = await res.json();
-
-            if (result.status === 'success' && result.data) {
-                // Server returns only non-sensitive user data
-                const validUser = result.data;
-                const actualRole = validUser.Role || selectedRole;
-                // Keep a minimal userData array for downstream code
-                userData = [validUser];
-                await handleLoginSuccess(validUser.Username || username, actualRole);
-                try { document.getElementById('password').value = ''; } catch (e) { }
-            } else {
-                // Handle role-not-permitted response specifically (do not reveal username existence)
-                if (result.code === 'role_not_permitted') {
-                    const roleErrorId = 'roleError';
-                    let roleErrorEl = document.getElementById(roleErrorId);
-                    if (!roleErrorEl) {
-                        roleErrorEl = document.createElement('div');
-                        roleErrorEl.id = roleErrorId;
-                        roleErrorEl.style.color = '#b00';
-                        roleErrorEl.style.marginTop = '8px';
-                        roleErrorEl.setAttribute('role', 'alert');
-                        roleErrorEl.setAttribute('aria-live', 'assertive');
-                        const roleSelector = document.querySelector('.role-selector');
-                        if (roleSelector && roleSelector.parentNode) roleSelector.parentNode.insertBefore(roleErrorEl, roleSelector.nextSibling);
-                    }
-                    roleErrorEl.textContent = 'Selected role is not available for this account. Please choose a different role or contact admin.';
-                    roleErrorEl.style.display = 'block';
-                    // Ensure the verifying overlay is hidden so the user can interact
-                    try { if (typeof window.hideLoader === 'function') window.hideLoader(); else hideLoader(); } catch (e) { console.warn('hideLoader not defined', e); }
-                    // Add aria-describedby and move focus to the most relevant role option for screen reader users
-                    const roleSelectorContainer = document.querySelector('.role-selector');
-                    if (roleSelectorContainer) {
-                        roleSelectorContainer.setAttribute('aria-describedby', roleErrorId);
-                        const focusTarget = roleSelectorContainer.querySelector('.role-option.active') || roleSelectorContainer.querySelector('.role-option');
-                        if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
-                    }
-                    // Visual highlight for the whole role selector area
-                    const roleSelector = document.querySelector('.role-selector');
-                    if (roleSelector) {
-                        roleSelector.classList.add('role-error');
-                    }
-                    // If the server provided allowed/permitted roles, mark options accordingly and auto-select the first permitted role
-                    const allowed = result.allowedRoles || result.permittedRoles || null;
-                    if (Array.isArray(allowed) && allowed.length > 0) {
-                        // Normalize allowed role ids to lowercase for comparison
-                        const allowedSet = new Set(allowed.map(r => r.toString().toLowerCase()));
-                        let autoSelected = false;
-                        document.querySelectorAll('.role-option').forEach(opt => {
-                            const name = (opt.dataset.role || '').toString().toLowerCase();
-                            if (!allowedSet.has(name)) {
-                                opt.classList.add('not-permitted');
-                            } else {
-                                // Auto-select the first permitted role if none selected
-                                if (!autoSelected) {
-                                    autoSelected = true;
-                                    opt.click();
-                                }
-                            }
-                        });
-                    }
-                } else {
-                try { document.getElementById('password').value = ''; } catch (e) { }
-                handleLoginFailure();
-                }
-            }
-        } catch (error) {
-        console.error('Login Error:', error);
-        alert('An error occurred during login. Please check your connection and try again.');
+    // SECURITY: Validate input before sending to backend
+    // Username: 2-50 characters, alphanumeric and underscore only
+    const usernameRegex = /^[a-zA-Z0-9_]{2,50}$/;
+    if (!username || !usernameRegex.test(username)) {
+        hideLoader();
         handleLoginFailure();
+        showNotification('Username must be 2-50 characters (letters, numbers, underscore only)', 'error');
+        return;
     }
+
+    // Password: at least 6 characters
+    if (!password || password.length < 6) {
+        hideLoader();
+        handleLoginFailure();
+        showNotification('Password must be at least 6 characters', 'error');
+        return;
+    }
+
+    try {
+        // Use a secure server-side login endpoint to avoid exposing all user data to the client
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        const payload = new URLSearchParams();
+        payload.append('action', 'login');
+        payload.append('username', username);
+        payload.append('password', password);
+        payload.append('role', selectedRole);
+
+        const res = await fetch(API_CONFIG.MAIN_SCRIPT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: payload.toString(),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const result = await res.json();
+
+        if (result.status === 'success' && result.data) {
+            // Server returns only non-sensitive user data (username, role, phc only)
+            const validUser = result.data;
+            const actualRole = validUser.Role || selectedRole;
+            // Keep a minimal userData array for downstream code
+            userData = [validUser];
+            await handleLoginSuccess(validUser.Username || username, actualRole);
+            try { passwordEl.value = ''; } catch (e) { }
+        } else {
+            // Handle role-not-permitted response specifically (do not reveal username existence)
+            if (result.code === 'role_not_permitted') {
+                const roleErrorId = 'roleError';
+                let roleErrorEl = document.getElementById(roleErrorId);
+                if (!roleErrorEl) {
+                    roleErrorEl = document.createElement('div');
+                    roleErrorEl.id = roleErrorId;
+                    roleErrorEl.style.color = '#b00';
+                    roleErrorEl.style.marginTop = '8px';
+                    roleErrorEl.setAttribute('role', 'alert');
+                    roleErrorEl.setAttribute('aria-live', 'assertive');
+                    const roleSelector = document.querySelector('.role-selector');
+                    if (roleSelector && roleSelector.parentNode) roleSelector.parentNode.insertBefore(roleErrorEl, roleSelector.nextSibling);
+                }
+                roleErrorEl.textContent = 'Selected role is not available for this account. Please choose a different role or contact admin.';
+                roleErrorEl.style.display = 'block';
+                // Ensure the verifying overlay is hidden so the user can interact
+                try { if (typeof window.hideLoader === 'function') window.hideLoader(); else hideLoader(); } catch (e) { console.warn('hideLoader not defined', e); }
+                // Add aria-describedby and move focus to the most relevant role option for screen reader users
+                const roleSelectorContainer = document.querySelector('.role-selector');
+                if (roleSelectorContainer) {
+                    roleSelectorContainer.setAttribute('aria-describedby', roleErrorId);
+                    const focusTarget = roleSelectorContainer.querySelector('.role-option.active') || roleSelectorContainer.querySelector('.role-option');
+                    if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
+                }
+                // Visual highlight for the whole role selector area
+                const roleSelector = document.querySelector('.role-selector');
+                if (roleSelector) {
+                    roleSelector.classList.add('role-error');
+                }
+                // If the server provided allowed/permitted roles, mark options accordingly and auto-select the first permitted role
+                const allowed = result.allowedRoles || result.permittedRoles || null;
+                if (Array.isArray(allowed) && allowed.length > 0) {
+                    // Normalize allowed role ids to lowercase for comparison
+                    const allowedSet = new Set(allowed.map(r => r.toString().toLowerCase()));
+                    let autoSelected = false;
+                    document.querySelectorAll('.role-option').forEach(opt => {
+                        const name = (opt.dataset.role || '').toString().toLowerCase();
+                        if (!allowedSet.has(name)) {
+                            opt.classList.add('not-permitted');
+                        } else {
+                            // Auto-select the first permitted role if none selected
+                            if (!autoSelected) {
+                                autoSelected = true;
+                                opt.click();
+                            }
+                        }
+                    });
+                }
+            } else {
+            try { passwordEl.value = ''; } catch (e) { }
+            handleLoginFailure();
+            }
+        }
+    } catch (error) {
+    console.error('Login Error:', error);
+    // SECURITY: Generic error message - don't reveal what went wrong
+    alert('An error occurred during login. Please check your connection and try again.');
+    handleLoginFailure();
+}
 });
 
 async function handleLoginSuccess(username, role) {

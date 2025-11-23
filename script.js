@@ -476,17 +476,45 @@ document.addEventListener('DOMContentLoaded', () => {
                         mgUsersLoaded = true;
                     }
                 } else if (target === 'mg-facilities') {
-                    await renderFacilitiesManagement();
+                    if (typeof window.renderFacilitiesManagement === 'function') {
+                        await window.renderFacilitiesManagement();
+                    } else {
+                        console.warn('renderFacilitiesManagement helper missing, reloading module');
+                        const mod = await import('./js/adminManagement.js?t=' + Date.now());
+                        if (mod && typeof mod.initPhcManagement === 'function') {
+                            await mod.initPhcManagement();
+                        }
+                    }
                 } else if (target === 'mg-analytics') {
-                    await renderManagementAnalytics();
+                    if (typeof window.renderManagementAnalytics === 'function') {
+                        await window.renderManagementAnalytics();
+                    } else {
+                        console.warn('renderManagementAnalytics helper missing');
+                    }
                 } else if (target === 'mg-cds') {
-                    await renderCdsRulesList();
+                    if (typeof window.renderCdsRulesList === 'function') {
+                        await window.renderCdsRulesList();
+                    } else {
+                        console.warn('renderCdsRulesList helper missing');
+                    }
                 } else if (target === 'mg-logs') {
-                    await renderAdminLogs();
+                    if (typeof window.renderAdminLogs === 'function') {
+                        await window.renderAdminLogs();
+                    } else {
+                        console.warn('renderAdminLogs helper missing');
+                    }
                 } else if (target === 'mg-export') {
-                    await initManagementExports();
+                    if (typeof window.initManagementExports === 'function') {
+                        await window.initManagementExports();
+                    } else {
+                        console.warn('initManagementExports helper missing');
+                    }
                 } else if (target === 'mg-advanced') {
-                    await initAdvancedAdminActions();
+                    if (typeof window.initAdvancedAdminActions === 'function') {
+                        await window.initAdvancedAdminActions();
+                    } else {
+                        console.warn('initAdvancedAdminActions helper missing');
+                    }
                 }
             } catch (e) {
                 console.warn('Management subtab init failed for', target, e);
@@ -7619,6 +7647,14 @@ async function initAdvancedAdminActions() {
     // Initialize CDS admin info
     updateCDSAdminInfo();
 }
+
+// Expose management helpers on the window object so dynamic handlers can always find them
+window.renderFacilitiesManagement = renderFacilitiesManagement;
+window.renderManagementAnalytics = renderManagementAnalytics;
+window.renderCdsRulesList = renderCdsRulesList;
+window.renderAdminLogs = renderAdminLogs;
+window.initManagementExports = initManagementExports;
+window.initAdvancedAdminActions = initAdvancedAdminActions;
 
 // Update CDS admin information display
 function updateCDSAdminInfo() {

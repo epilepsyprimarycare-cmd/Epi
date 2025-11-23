@@ -280,6 +280,10 @@ class CDSIntegration {
   console.log('CDS Integration: Transforming follow-up data to patient context');
       // Transform follow-up form data to patient context format
       const patientContext = this.transformFollowUpDataToPatientContext(formData);
+      const missingLastVisitInfo = patientContext?.followUp && (patientContext.followUp.daysSinceLastVisit === null || patientContext.followUp.daysSinceLastVisit === undefined);
+      if (missingLastVisitInfo) {
+        throw new Error('Cannot calculate seizure frequency trend: Missing last visit date.');
+      }
   console.log('CDS Integration: transformed patientContext:', patientContext);
       
       // Start timing for performance measurement
@@ -776,7 +780,7 @@ class CDSIntegration {
     // For daysSinceLast calculation, we specifically want the PREVIOUS visit date, not the current one.
     // If followUp.followUpDate is present, it might be the current date (if explicitly set) or previous (if from patient record).
     // To be safe, we prefer LastFollowUpDate from the source if available, as that reliably indicates history.
-    const lastFollowUpISO = pickFirst('LastFollowUpDate', 'lastFollowUpDate', 'lastVisitDate') || followUp.followUpDate;
+    const lastFollowUpISO = pickFirst('LastFollowUpDate', 'lastFollowUpDate', 'lastVisitDate', 'currentFollowUpData.lastFollowUpDate') || followUp.followUpDate;
     
     const baselineRaw = epilepsy.baselineFrequency || epilepsy.seizureFrequency || pickFirst('baselineFreqLabel');
     const baselineCategory = normalizeFrequencyLabel(baselineRaw) || null;

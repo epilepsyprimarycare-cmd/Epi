@@ -26,6 +26,77 @@ let cdsState = {
     hasReferralRecommendation: false
 };
 
+function getPatientLastVisitDate(patient) {
+    try {
+        const manualOverride = cdsState?.manualLastVisitDate;
+        if (manualOverride) {
+            const manualDate = new Date(manualOverride);
+            if (!isNaN(manualDate.getTime())) {
+                return manualDate.toISOString();
+            }
+        }
+    } catch (e) {
+        console.warn('CDS: Failed to parse manual last visit override:', e);
+    }
+
+    if (!patient) return null;
+
+    const candidates = [
+        patient.LastFollowUpDate,
+        patient.lastFollowUpDate,
+        patient.LastFollowUp,
+        patient.lastFollowUp,
+        patient.lastVisitDate,
+        patient.LastVisitDate,
+        patient.PreviousVisitDate,
+        patient.previousVisitDate
+    ];
+
+    for (const candidate of candidates) {
+        if (!candidate) continue;
+        const parsed = new Date(candidate);
+        if (!isNaN(parsed.getTime())) {
+            return parsed.toISOString();
+        }
+    }
+
+    return null;
+}
+
+function ensureLastVisitDate(patient) {
+    let existing = getPatientLastVisitDate(patient);
+    if (existing) {
+        return existing;
+    }
+
+    if (typeof window === 'undefined' || typeof window.prompt !== 'function') {
+        return null;
+    }
+
+    const manualEntry = window.prompt('Last visit date is missing. Enter last visit date (YYYY-MM-DD) to run CDS, or leave blank to cancel.');
+    if (!manualEntry) {
+        return null;
+    }
+
+    const parsed = new Date(manualEntry);
+    if (isNaN(parsed.getTime())) {
+        alert('Invalid date. Please use YYYY-MM-DD format.');
+        return null;
+    }
+
+    const iso = parsed.toISOString();
+    if (patient) {
+        patient.LastFollowUpDate = iso;
+        patient.lastFollowUpDate = iso;
+        if (!patient.currentFollowUpData) {
+            patient.currentFollowUpData = {};
+        }
+        patient.currentFollowUpData.lastFollowUpDate = iso;
+    }
+    cdsState.manualLastVisitDate = iso;
+    return iso;
+}
+
 // Evaluate CDS with a freshly submitted follow-up so the latest seizuresSinceLastVisit is used
 async function evaluateCdsWithFollowUp(patientId, followUpData) {
     if (!patientId || !followUpData) return;
@@ -566,19 +637,34 @@ async function handleMedicationChangeToggle(isChecked) {
             updateRecommendationsSection('Patient data with valid ID required for clinical recommendations', 'warning');
             return;
         }
+
+        const lastVisitISO = ensureLastVisitDate(cdsState.currentPatient);
+        if (!lastVisitISO) {
+            console.warn('CDS Analysis: Blocking execution due to missing last visit date');
+            showStreamlinedMedicationInterface();
+            updateRecommendationsSection('Last visit date required to calculate seizure frequency. Please enter or confirm the last visit date before running CDS.', 'warning');
+            return;
+        }
         showStreamlinedMedicationInterface();
 
         // Extract current form data to include in CDS analysis
         const currentFormData = extractCurrentFollowUpFormData();
+        currentFormData.lastFollowUpDate = lastVisitISO;
 
         // Merge current form data with patient data for CDS analysis
         const patientDataForCDS = {
             ...cdsState.currentPatient,
+            lastFollowUpDate: lastVisitISO,
             currentFollowUpData: currentFormData
         };
 
         // Use CDSIntegration for v1.2 CDS analysis and rendering
         const analysis = await window.cdsIntegration.analyzeFollowUpData(patientDataForCDS);
+        if (!analysis || analysis.success === false) {
+            const errorMessage = analysis?.error || 'Clinical decision support unavailable. Missing last visit date?';
+            updateRecommendationsSection(errorMessage, 'warning');
+            return;
+        }
         window.cdsIntegration.displayAlerts(analysis.alerts, 'cdsAlerts');
 
         // Update the streamlined CDS display
@@ -836,6 +922,14 @@ async function performBackgroundCDSAnalysis(patient) {
             return false;
         }
 
+        const lastVisitISO = ensureLastVisitDate(patient);
+        if (!lastVisitISO) {
+            console.warn('CDS Analysis: Missing last visit date, declining to run analysis');
+            showStreamlinedMedicationInterface();
+            updateRecommendationsSection('Last visit date required before calculating seizure frequency trends.', 'warning');
+            return false;
+        }
+
         // Check for one-time disclaimer
         const hasAgreedToDisclaimer = localStorage.getItem('cdssDisclaimerAgreed') === 'true';
         if (!hasAgreedToDisclaimer) {
@@ -853,6 +947,10 @@ async function performBackgroundCDSAnalysis(patient) {
             console.log('CDS Analysis: Calling cdsIntegration.analyzeFollowUpData');
             const analysis = await window.cdsIntegration.analyzeFollowUpData(patient);
             console.log('CDS Analysis: Received analysis result:', analysis);
+            if (!analysis || analysis.success === false) {
+                updateRecommendationsSection(analysis?.error || 'Clinical decision support unavailable.', 'warning');
+                return false;
+            }
             if (analysis && analysis.alerts) {
                 window.cdsIntegration.displayAlerts(analysis.alerts, 'cdsAlerts');
             }
@@ -925,9 +1023,29 @@ function updateStreamlinedCDSDisplay(analysis) {
     const recommendations = analysis?.prompts || [];
 
     // Deduplicate and consolidate similar recommendations
-    const consolidatedRecommendations = (window.CDSValidation && typeof window.CDSValidation.consolidateRecommendations === 'function')
+    let consolidatedRecommendations = (window.CDSValidation && typeof window.CDSValidation.consolidateRecommendations === 'function')
         ? window.CDSValidation.consolidateRecommendations(recommendations)
         : recommendations;
+
+    const adherenceValue = getCurrentFollowUpAdherence();
+    const normalizedAdherence = normalizeAdherenceValue(adherenceValue);
+    const adherenceBarriersPresent = normalizedAdherence && normalizedAdherence !== 'always';
+
+    const statusBadges = [];
+    consolidatedRecommendations = consolidatedRecommendations.filter(alert => {
+        if (!alert) return false;
+        if (adherenceBarriersPresent && (isDoseAdequatePrompt(alert) || isEscalationPrompt(alert))) {
+            return false; // Gate optimization/escalation when adherence is poor
+        }
+
+        const badge = extractStatusBadge(alert);
+        if (badge) {
+            statusBadges.push(badge);
+            return false;
+        }
+
+        return true;
+    });
 
     // Sort by severity (high -> medium -> low) and limit to 3-4 most important
     const severityOrder = { 'high': 3, 'medium': 2, 'low': 1 };
@@ -937,10 +1055,17 @@ function updateStreamlinedCDSDisplay(analysis) {
 
     let recommendationHtml = '';
 
+    if (statusBadges.length > 0) {
+        recommendationHtml += `
+            <div class="cds-status-badges" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+                ${statusBadges.map(renderStatusBadge).join('')}
+            </div>
+        `;
+    }
+
     if (sortedRecommendations.length > 0) {
-        recommendationHtml = sortedRecommendations.map(alert => {
-            const summary = makeCDSSummary(alert);
-            const fullText = escapeHtml(alert.text || '');
+        recommendationHtml += sortedRecommendations.map(alert => {
+            const summary = stripRecommendationPrefix(makeCDSSummary(alert));
             const rationale = alert.rationale ? escapeHtml(alert.rationale) : '';
 
             let nextStepsHtml = '';
@@ -953,7 +1078,10 @@ function updateStreamlinedCDSDisplay(analysis) {
 
             return `
                 <div style="margin-bottom:12px; padding:8px; border-radius:4px; background:#f1f8ff; border-left:4px solid ${alert.severity === 'high' ? '#dc3545' : alert.severity === 'medium' ? '#ffc107' : '#007bff'}; cursor: ${rationale ? 'help' : 'default'};"${rationaleTooltip}>
-                    <strong style="font-size:0.95em;">${escapeHtml(summary)}</strong>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:0.65em; font-weight:bold; text-transform:uppercase; color:${alert.severity === 'high' ? '#c82333' : alert.severity === 'medium' ? '#b8860b' : '#0056b3'};">${alert.severity || 'info'}</span>
+                        <strong style="font-size:0.95em;">${escapeHtml(summary)}</strong>
+                    </div>
                     ${nextStepsHtml}
                     ${consolidatedRecommendations.length > 4 ? `<div style="margin-top:4px; font-size:0.8em; color:#666;">${consolidatedRecommendations.length - 4} more recommendations available</div>` : ''}
                 </div>
@@ -1028,6 +1156,88 @@ function updateRecommendationsSection(content, type = 'info', isHtml = false) {
 
         recommendationsContent.appendChild(wrapper);
     }
+}
+
+function isDoseAdequatePrompt(alert) {
+    if (!alert) return false;
+    const text = (alert.text || alert.title || '').toString().toLowerCase();
+    if (!text) return false;
+    return text.includes('dose') && text.includes('adequate');
+}
+
+function normalizeAdherenceValue(value) {
+    if (!value && value !== 0) return null;
+    const normalized = value.toString().trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized.startsWith('always')) return 'always';
+    if (normalized.includes('occasion')) return 'occasionally';
+    if (normalized.includes('frequent') || normalized.includes('often')) return 'frequently';
+    if (normalized.includes('stop') || normalized.includes('stopped')) return 'stopped';
+    return normalized;
+}
+
+function getCurrentFollowUpAdherence() {
+    try {
+        return cdsState?.currentPatient?.currentFollowUpData?.adherence
+            || cdsState?.currentPatient?.Adherence
+            || cdsState?.currentPatient?.adherence
+            || '';
+    } catch (e) {
+        console.warn('CDS Display: Unable to read adherence value', e);
+        return '';
+    }
+}
+
+function isEscalationPrompt(alert) {
+    if (!alert) return false;
+    const category = (alert.rawAlert?.category || alert.category || '').toString().toLowerCase();
+    if (['escalation', 'adjunct', 'add-on', 'combo', 'polytherapy'].some(tag => category.includes(tag))) {
+        return true;
+    }
+    const text = (alert.text || alert.title || '').toString().toLowerCase();
+    if (!text) return false;
+    const keywords = ['add ', 'adding ', 'add-on', 'adjunct', 'adjunctive', 'combine', 'switch to', 'escalat'];
+    return keywords.some(keyword => text.includes(keyword));
+}
+
+function extractStatusBadge(alert) {
+    if (!alert) return null;
+    const text = (alert.text || alert.title || '').toString();
+    if (!text) return null;
+    const normalized = text.toLowerCase();
+
+    if (normalized.includes('dose') && normalized.includes('adequate')) {
+        return {
+            label: 'Dose Status',
+            value: 'Adequate',
+            tone: 'success',
+            tooltip: text
+        };
+    }
+
+    return null;
+}
+
+function renderStatusBadge(badge) {
+    if (!badge) return '';
+    const palette = {
+        success: { bg: '#e6fffa', color: '#00695c', border: '#26a69a' },
+        warning: { bg: '#fff8e1', color: '#8a6d3b', border: '#ffb300' },
+        info: { bg: '#e3f2fd', color: '#0d47a1', border: '#42a5f5' }
+    };
+    const colors = palette[badge.tone] || palette.info;
+    const tooltip = badge.tooltip ? ` title="${escapeHtml(badge.tooltip)}"` : '';
+    return `
+        <div class="cds-status-badge"${tooltip} style="display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; border:1px solid ${colors.border}; background:${colors.bg}; color:${colors.color}; font-weight:600; font-size:0.8em;">
+            <span style="text-transform:uppercase; letter-spacing:0.05em; font-size:0.7em;">${escapeHtml(badge.label)}</span>
+            <span>${escapeHtml(badge.value)}</span>
+        </div>
+    `;
+}
+
+function stripRecommendationPrefix(text) {
+    if (!text) return '';
+    return text.replace(/^Clinical\s+(Warning|Recommendation):\s*/i, '').trim();
 }
 
 /**

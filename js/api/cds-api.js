@@ -173,6 +173,7 @@ class CDSApiClient {
         clientVersion: '1.2.0',
         timestamp: new Date().toISOString()
       };
+      const hasAuthToken = typeof basePayload.authToken === 'string' && basePayload.authToken.trim().length > 10;
 
       // Helper that posts with a given action and returns parsed JSON result
       const postEvaluate = async (actionName) => {
@@ -199,26 +200,29 @@ class CDSApiClient {
   // We'll create a promise that represents this evaluation so we can dedupe concurrent callers
   const evaluationPromise = (async () => {
   try {
-        try {
-          evalResult = await postEvaluate('cdsEvaluate');
-        } catch (err) {
-          // fetchWithRetry throws for non-OK responses; detect 401 in the error message and fallback
-          const msg = (err && err.message) ? err.message : String(err);
-          if (msg.indexOf('401') !== -1 || /Authentication required/i.test(msg)) {
-            console.warn('CDS API: cdsEvaluate returned 401 or auth error, retrying publicCdsEvaluate');
-            evalResult = await postEvaluate('publicCdsEvaluate');
-          } else {
-            throw err;
+        if (hasAuthToken) {
+          try {
+            evalResult = await postEvaluate('cdsEvaluate');
+          } catch (err) {
+            const msg = (err && err.message) ? err.message : String(err);
+            if (msg.indexOf('401') !== -1 || /Authentication required/i.test(msg)) {
+              console.warn('CDS API: cdsEvaluate returned 401 or auth error, retrying publicCdsEvaluate');
+              evalResult = await postEvaluate('publicCdsEvaluate');
+            } else {
+              throw err;
+            }
           }
-        }
-        // If we got a non-success body from cdsEvaluate (e.g., status:error with code 401), attempt fallback
-        if (evalResult && evalResult.body && evalResult.body.status && evalResult.body.status !== 'success') {
-          const code = evalResult.body.code || 0;
-          const msg = evalResult.body.message || '';
-          if (code === 401 || /Authentication required/i.test(msg)) {
-            console.warn('CDS API: cdsEvaluate responded with auth error, retrying publicCdsEvaluate');
-            evalResult = await postEvaluate('publicCdsEvaluate');
+          if (evalResult && evalResult.body && evalResult.body.status && evalResult.body.status !== 'success') {
+            const code = evalResult.body.code || 0;
+            const msg = evalResult.body.message || '';
+            if (code === 401 || /Authentication required/i.test(msg)) {
+              console.warn('CDS API: cdsEvaluate responded with auth error, retrying publicCdsEvaluate');
+              evalResult = await postEvaluate('publicCdsEvaluate');
+            }
           }
+        } else {
+          console.log('CDS API: No auth token detected, using publicCdsEvaluate directly');
+          evalResult = await postEvaluate('publicCdsEvaluate');
         }
       } catch (finalErr) {
         console.error('CDS API: Evaluation failed after attempts:', finalErr);

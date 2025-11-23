@@ -813,76 +813,6 @@ if (feltImprovement && noImprovementQuestions) {
     feltImprovement.dispatchEvent(new Event('change'));
 }
 
-// --- DATE FORMATTING FUNCTIONS ---
-function formatDateForInput(date) {
-    if (!date) return '';
-    const d = new Date(date);
-    if (isNaN(d.getTime())) return '';
-
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-
-    return `${year}-${month}-${day}`; // yyyy-mm-dd format for input type="date"
-}
-
-function formatDateForDisplay(date) {
-    if (!date) return 'N/A';
-    const d = new Date(date);
-    if (isNaN(d.getTime())) return 'Invalid Date';
-
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-
-    return `${day}/${month}/${year}`;
-}
-
-/**
- * Parse date strings in various formats without timezone shifts
- * @param {string|Date} dateInput - Date string or Date object
- * @returns {Date|null} Parsed date or null if invalid
- */
-function parseFlexibleDate(dateInput) {
-    if (!dateInput) return null;
-
-    // If already a Date object, return it
-    if (dateInput instanceof Date) {
-        return isNaN(dateInput.getTime()) ? null : dateInput;
-    }
-
-    // Handle string inputs
-    const dateStr = String(dateInput).trim();
-    if (!dateStr) return null;
-
-    // Try different parsing strategies to avoid timezone shifts
-
-    // 1. Try ISO format (yyyy-mm-dd or yyyy-mm-ddThh:mm:ss)
-    if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
-        const date = new Date(dateStr + (dateStr.length === 10 ? 'T00:00:00' : ''));
-        return isNaN(date.getTime()) ? null : date;
-    }
-
-    // 2. Try dd/mm/yyyy format (day first, then month)
-    const ddmmyyyyMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (ddmmyyyyMatch) {
-        const [, day, month, year] = ddmmyyyyMatch;
-        const dayNum = parseInt(day, 10);
-        const monthNum = parseInt(month, 10);
-        const yearNum = parseInt(year, 10);
-
-        // Validate ranges: day 1-31, month 1-12
-        if (dayNum >= 1 && dayNum <= 31 && monthNum >= 1 && monthNum <= 12) {
-            const date = new Date(yearNum, monthNum - 1, dayNum);
-            return isNaN(date.getTime()) ? null : date;
-        }
-    }
-
-    // 3. Try native Date parsing as last resort
-    const date = new Date(dateStr);
-    return isNaN(date.getTime()) ? null : date;
-}
-
 // Set default date inputs to today in dd/mm/yyyy
 document.addEventListener('DOMContentLoaded', function () {
     const today = new Date();
@@ -1510,8 +1440,14 @@ async function initializeDashboard() {
 
 function logout(options = {}) {
     const opts = options || {};
-    allowAddPatientForViewer = false;
-    setStoredToggleState(false);
+    let requiresHardReload = false;
+
+    try {
+        allowAddPatientForViewer = false;
+        setStoredToggleState(false);
+    } catch (err) {
+        console.warn('Failed to persist viewer toggle state during logout:', err);
+    }
 
     try {
         if (typeof window.clearSessionToken === 'function') {
@@ -1535,8 +1471,16 @@ function logout(options = {}) {
 
     const dashboard = document.getElementById('dashboardScreen');
     const loginScreen = document.getElementById('loginScreen');
-    if (dashboard) dashboard.style.display = 'none';
-    if (loginScreen) loginScreen.style.display = 'block';
+    if (dashboard) {
+        dashboard.style.display = 'none';
+    } else {
+        requiresHardReload = true;
+    }
+    if (loginScreen) {
+        loginScreen.style.display = 'flex';
+    } else {
+        requiresHardReload = true;
+    }
 
     try { hideLoader(); } catch (err) { /* ignore */ }
 
@@ -1550,7 +1494,7 @@ function logout(options = {}) {
         console.warn('Failed to dispatch userLoggedOut event:', err);
     }
 
-    if (opts.hardRefresh) {
+    if (opts.hardRefresh || requiresHardReload) {
         window.location.reload();
     }
 }
@@ -3979,37 +3923,13 @@ function checkIfFollowUpNeedsReset(patient) {
         return false;
     }
 
-    // Helper: parse dates saved as dd/mm/yyyy or ISO formats
-    function parseFlexibleDate(val) {
-        if (!val) return null;
-        if (val instanceof Date) return isNaN(val.getTime()) ? null : new Date(val.getFullYear(), val.getMonth(), val.getDate());
-        const s = String(val).trim();
-        // dd/mm/yyyy or dd-mm-yyyy
-        const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-        if (m) {
-            let d = parseInt(m[1], 10);
-            let mo = parseInt(m[2], 10) - 1;
-            let y = parseInt(m[3], 10);
-            if (y < 100) y += 2000;
-            const dt = new Date(y, mo, d, 0, 0, 0, 0);
-            return isNaN(dt.getTime()) ? null : dt;
-        }
-        // ISO yyyy-mm-dd (optionally with time)
-        if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-            const dt = new Date(s.length === 10 ? s + 'T00:00:00' : s);
-            return isNaN(dt.getTime()) ? null : new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
-        }
-        // Fallback to native
-        const dt = new Date(s);
-        return isNaN(dt.getTime()) ? null : new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
-    }
-
     // Get the current date (normalized)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     const lastFollowUp = parseFlexibleDate(patient.LastFollowUp);
     if (!lastFollowUp) return false;
+    lastFollowUp.setHours(0, 0, 0, 0);
 
     // Compute next due date = last follow-up + 1 calendar month (normalized)
     const nextDueDate = new Date(lastFollowUp.getFullYear(), lastFollowUp.getMonth() + 1, lastFollowUp.getDate());
@@ -7020,10 +6940,36 @@ if (document.readyState === 'loading') {
     attachPatientDetailModalButtons();
 }
 
+function attachLogoutButton() {
+    try {
+        const btn = document.getElementById('logoutBtn');
+        if (!btn || btn.dataset.logoutBound === 'true') {
+            return;
+        }
+        btn.dataset.logoutBound = 'true';
+        btn.addEventListener('click', (event) => {
+            if (event) event.preventDefault();
+            try {
+                logout();
+            } catch (err) {
+                console.error('Logout handler failed; forcing full refresh.', err);
+                window.location.reload();
+            }
+        });
+    } catch (err) {
+        console.warn('Failed to wire logout button:', err);
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', attachLogoutButton);
+} else {
+    attachLogoutButton();
+}
+
 // Static handler map: prefer module-scoped or imported functions, fall back to window only if necessary
 const HANDLERS = {
     // core app handlers (many are defined in this file)
-    logout: typeof logout === 'function' ? logout : (window.logout || null),
     exportToCSV: typeof exportToCSV === 'function' ? exportToCSV : (window.exportToCSV || null),
     refreshData: typeof refreshData === 'function' ? refreshData : (window.refreshData || null),
     manualResetFollowUps: typeof manualResetFollowUps === 'function' ? manualResetFollowUps : (window.manualResetFollowUps || null),
@@ -7055,8 +7001,9 @@ const HANDLERS = {
 
 // Attach listeners for global action buttons converted from inline onclicks
 function attachGlobalActionListeners() {
+    attachLogoutButton();
+
     const map = [
-        ['logoutBtn', 'logout'],
         ['exportCsvBtn', 'exportToCSV'],
         ['exportCsvBtn2', 'exportToCSV'],
         ['exportCsvBtnMgmt', 'exportToCSV'],

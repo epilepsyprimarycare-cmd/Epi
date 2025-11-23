@@ -39,47 +39,28 @@ if (typeof window !== 'undefined') {
 }
 
 function formatDateForDisplay(date) {
+    if (window.DateUtils && typeof window.DateUtils.formatForDisplay === 'function') {
+        return window.DateUtils.formatForDisplay(date);
+    }
     if (!date) return 'N/A';
-    const d = new Date(date);
-    if (isNaN(d.getTime())) return date; // Return as is if invalid date
-    const lang = (window.EpicareI18n && window.EpicareI18n.getCurrentLang && window.EpicareI18n.getCurrentLang()) || 'en-GB';
-    return d.toLocaleDateString(lang);
+    const fallback = new Date(date);
+    if (isNaN(fallback.getTime())) return date;
+    return fallback.toLocaleDateString('en-GB');
 }
 
-/**
- * Parse flexible date strings (accepts ISO YYYY-MM-DD or DD/MM/YYYY) and return a Date object.
- * Returns null if the input cannot be parsed.
- */
 function parseDateFlexible(dateInput) {
+    if (window.DateUtils && typeof window.DateUtils.parse === 'function') {
+        return window.DateUtils.parse(dateInput);
+    }
     if (!dateInput) return null;
-    if (dateInput instanceof Date) {
-        return isNaN(dateInput.getTime()) ? null : dateInput;
-    }
-    const s = String(dateInput).trim();
-    // Try ISO first
-    const isoMatch = s.match(/^\d{4}-\d{2}-\d{2}/);
-    if (isoMatch) {
-        const d = new Date(s);
-        if (!isNaN(d.getTime())) return d;
-    }
-    // Try DD/MM/YYYY
-    const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (dmy) {
-        const day = parseInt(dmy[1], 10);
-        const month = parseInt(dmy[2], 10) - 1;
-        const year = parseInt(dmy[3], 10);
-        const d = new Date(year, month, day);
-        if (!isNaN(d.getTime())) return d;
-    }
-    // Last resort: try native Date parse
-    const d = new Date(s);
-    return isNaN(d.getTime()) ? null : d;
+    const attempt = new Date(dateInput);
+    return isNaN(attempt.getTime()) ? null : attempt;
 }
 
-/**
- * Format a Date as ddmmyyyy suitable for filenames (no separators).
- */
 function formatDateForFilename(date) {
+    if (window.DateUtils && typeof window.DateUtils.formatForFilename === 'function') {
+        return window.DateUtils.formatForFilename(date);
+    }
     const d = parseDateFlexible(date) || new Date();
     const dd = String(d.getDate()).padStart(2, '0');
     const mm = String(d.getMonth() + 1).padStart(2, '0');

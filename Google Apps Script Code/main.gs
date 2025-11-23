@@ -160,6 +160,7 @@ function isPublicAction(action) {
 
 /**
  * Format a Date object (or date-parsable string) as DD/MM/YYYY
+ * NOTE: Keep this logic in sync with js/date-utils.js::formatDateDDMMYYYY for consistent UX.
  * @param {Date|string} d
  * @returns {string} Formatted date
  */
@@ -175,6 +176,7 @@ function formatDateDDMMYYYY(d) {
 /**
  * Parse a flexible date string into a Date object.
  * Accepts ISO (yyyy-mm-dd or full ISO) and dd/mm/yyyy formats.
+ * NOTE: The frontend mirror of this helper lives in js/date-utils.js.
  * Returns null if parsing fails.
  */
 function parseDateFlexible(dateInput) {

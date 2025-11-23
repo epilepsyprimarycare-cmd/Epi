@@ -1974,10 +1974,11 @@ function evaluateCDS(patientData) {
 
 /**
  * Check for breakthrough seizures and adherence gating logic
+ * Enhanced with barrier identification and targeted counseling
  * @param {Object} patientContext - Normalized patient context
  * @param {Object} derived - Derived clinical attributes
  * @param {Object} result - Result object to modify
- * @returns {Object} Gating information
+ * @returns {Object} Gating information with adherence barriers
  */
 function checkBreakthroughAdherenceGating(patientContext, derived, result) {
   const followUp = patientContext.followUp || {};
@@ -1987,6 +1988,7 @@ function checkBreakthroughAdherenceGating(patientContext, derived, result) {
 
   let hasBreakthrough = false;
   let hasPoorAdherence = false;
+  let adherenceBarriers = [];
 
   // Only evaluate if we have seizure count data from follow-up
   if (seizuresCount !== undefined && seizuresCount !== null && seizuresCount >= 0 &&
@@ -2005,25 +2007,46 @@ function checkBreakthroughAdherenceGating(patientContext, derived, result) {
 
     hasBreakthrough = currentFreqRank > baselineFreqRank;
 
-    // Check for poor adherence
-    hasPoorAdherence = ['Frequently miss', 'Completely stopped medicine'].includes(treatmentAdherence);
+    // Check for poor adherence - Canonicalize first
+    const canonicalAdherence = canonicalizeAdherence(treatmentAdherence);
+    hasPoorAdherence = ['Frequently miss', 'Completely stopped medicine'].includes(canonicalAdherence);
 
-    // If breakthrough AND poor adherence, prioritize adherence
+    // Identify adherence barriers (NEW v1.2.1)
+    if (hasPoorAdherence) {
+      adherenceBarriers = identifyAdherenceBarriers(patientContext, canonicalAdherence);
+    }
+
+    // If breakthrough AND poor adherence, prioritize adherence with targeted counseling
     if (hasBreakthrough && hasPoorAdherence) {
+      // Generate targeted adherence counseling based on identified barriers
+      const counselingSteps = generateAdherenceCounseling(adherenceBarriers);
+
       result.warnings.push({
         id: 'breakthrough_poor_adherence_gating',
         severity: 'high',
-        text: 'CRITICAL: Breakthrough seizures detected with POOR ADHERENCE. All treatment optimization recommendations are suspended until adherence is addressed.',
-        rationale: 'Poor adherence is the most likely cause of breakthrough seizures. Treatment changes should not be considered until adherence is optimized.',
+        text: `CRITICAL: Breakthrough seizures detected with ${canonicalAdherence.toLowerCase()}. All treatment optimization recommendations are suspended until adherence is addressed.`,
+        rationale: 'Poor adherence is the most likely cause of breakthrough seizures (responsible for 30-50% of treatment failures). Treatment changes should not be considered until adherence is optimized.',
         nextSteps: [
-          'Focus exclusively on adherence counseling and barriers',
-          'Identify and address adherence barriers (cost, side effects, forgetfulness)',
-          'Consider regimen simplification or adherence aids',
+          'Focus exclusively on adherence counseling and barrier mitigation',
+          ...counselingSteps,
+          'Consider regimen simplification (once-daily dosing)',
           'Reassess seizure control in 4 weeks after adherence optimization',
           'DO NOT change medications or doses until adherence is confirmed'
         ],
         ref: 'adherence_priority'
       });
+
+      // Add specific prompts for identified barriers
+      if (adherenceBarriers.length > 0) {
+        result.prompts.push({
+          id: 'adherence_barriers_identified',
+          severity: 'high',
+          text: `Identified adherence barrier(s): ${adherenceBarriers.join(', ')}.`,
+          rationale: 'Addressing specific barriers is more effective than generic adherence counseling.',
+          nextSteps: generateBarrierSpecificActions(adherenceBarriers),
+          ref: 'adherence_barriers'
+        });
+      }
     } else if (hasBreakthrough && !hasPoorAdherence) {
       // Breakthrough with good adherence - proceed with normal logic
       // This will be handled by evaluateBreakthroughSeizures later
@@ -2033,8 +2056,151 @@ function checkBreakthroughAdherenceGating(patientContext, derived, result) {
   return {
     hasBreakthrough: hasBreakthrough,
     hasPoorAdherence: hasPoorAdherence,
+    adherenceBarriers: adherenceBarriers,
     shouldGateOptimizations: hasBreakthrough && hasPoorAdherence
   };
+}
+
+/**
+ * Identify specific barriers to medication adherence
+ * NEW in v1.2.1
+ * @param {Object} patientContext - Patient context
+ * @param {string} adherencePattern - Canonical adherence pattern
+ * @returns {Array} Array of identified barriers
+ */
+function identifyAdherenceBarriers(patientContext, adherencePattern) {
+  const barriers = [];
+  const followUp = patientContext.followUp || {};
+  const flags = patientContext.clinicalFlags || {};
+
+  // Infer barriers from clinical context
+  
+  // Side effects - check from AE reporting
+  if (flags.adverseEffects || followUp.sideEffectsPresent) {
+    barriers.push('Side effects from current ASM');
+  }
+
+  // Cognitive side effects - check for cognitive complaints
+  if (flags.cognitiveComplaint || followUp.cognitiveIssues) {
+    barriers.push('Cognitive side effects (confusion, memory issues)');
+  }
+
+  // Cost/access - common in resource-limited settings
+  if (patientContext.socioeconomic?.lowIncome || followUp.affordabilityIssue) {
+    barriers.push('Medication cost or access difficulty');
+  }
+
+  // Complex regimen - multiple drugs or high frequency
+  const medCount = (patientContext.regimen?.medications || []).length;
+  if (medCount >= 3) {
+    barriers.push('Complex medication regimen (too many drugs/doses)');
+  }
+
+  // Forgetfulness - explicitly stated
+  if (adherencePattern === 'Frequently miss' && !flags.adverseEffects && !followUp.affordabilityIssue) {
+    barriers.push('Forgetfulness/lack of routine');
+  }
+
+  // Lack of understanding
+  if (flags.educationLevel === 'Low' || flags.healthLiteracy === 'Low') {
+    barriers.push('Limited health literacy or understanding of epilepsy');
+  }
+
+  // Seizure control (patient may not perceive need)
+  const seizureFreq = patientContext.epilepsy?.seizureFrequency || 'unknown';
+  if (seizureFreq === 'Yearly' || seizureFreq === '< Yearly') {
+    barriers.push('Infrequent seizures (may not perceive medication necessity)');
+  }
+
+  // Social factors
+  if (flags.socialStress || followUp.familySupport === 'Poor') {
+    barriers.push('Psychosocial stress or poor family support');
+  }
+
+  return barriers.length > 0 ? barriers : ['Unknown or multiple barriers'];
+}
+
+/**
+ * Generate targeted adherence counseling steps
+ * NEW in v1.2.1
+ * @param {Array} barriers - Identified adherence barriers
+ * @returns {Array} Targeted counseling steps
+ */
+function generateAdherenceCounseling(barriers) {
+  const counseling = [];
+
+  if (barriers.some(b => b.includes('Side effects'))) {
+    counseling.push('Discuss side effects openly: "Which AE bothers you most? Can we adjust dose or switch drugs?"');
+  }
+
+  if (barriers.some(b => b.includes('Cognitive'))) {
+    counseling.push('Consider dose reduction or alternative ASM with better cognitive profile (e.g., Levetiracetam)');
+  }
+
+  if (barriers.some(b => b.includes('cost') || b.includes('access'))) {
+    counseling.push('Explore assistance programs, generic options, or community health support');
+  }
+
+  if (barriers.some(b => b.includes('Complex'))) {
+    counseling.push('Simplify regimen: switch to once-daily formulation or consolidate doses where possible');
+  }
+
+  if (barriers.some(b => b.includes('Forgetfulness'))) {
+    counseling.push('Use memory aids: pill organizers, phone reminders, linking doses to meals or daily routines');
+  }
+
+  if (barriers.some(b => b.includes('health literacy'))) {
+    counseling.push('Provide clear, simple education: "Taking meds stops seizures → prevents injuries/death"');
+  }
+
+  if (barriers.some(b => b.includes('Infrequent seizures'))) {
+    counseling.push('Reinforce: "Seizures will return if you stop - meds prevent them. Don\'t stop even if seizure-free"');
+  }
+
+  if (barriers.some(b => b.includes('Psychosocial'))) {
+    counseling.push('Address underlying stress/family issues: referral to counselor or social support services');
+  }
+
+  return counseling.length > 0 ? counseling : ['Explore barriers further in next visit'];
+}
+
+/**
+ * Generate barrier-specific action items
+ * NEW in v1.2.1
+ * @param {Array} barriers - Identified adherence barriers
+ * @returns {Array} Specific action items for clinician
+ */
+function generateBarrierSpecificActions(barriers) {
+  const actions = [];
+
+  barriers.forEach(barrier => {
+    if (barrier.includes('Side effects')) {
+      actions.push('Review specific side effects and consider dose reduction or ASM switch');
+    }
+    if (barrier.includes('cost')) {
+      actions.push('Refer to pharmacy assistance program or social services');
+    }
+    if (barrier.includes('Complex')) {
+      actions.push('Simplify regimen to once-daily dosing where feasible');
+    }
+    if (barrier.includes('Forgetfulness')) {
+      actions.push('Provide pill organizer + mobile reminder setup');
+    }
+    if (barrier.includes('Cognitive')) {
+      actions.push('Consider switching to Levetiracetam or reducing polypharmacy');
+    }
+    if (barrier.includes('health literacy')) {
+      actions.push('Provide written seizure/medication education handout');
+    }
+    if (barrier.includes('Infrequent')) {
+      actions.push('Educate on need for continuous medication despite seizure freedom');
+    }
+    if (barrier.includes('family')) {
+      actions.push('Involve family in counseling; consider family therapy referral');
+    }
+  });
+
+  return actions.length > 0 ? actions : ['Schedule detailed adherence counseling session'];
 }
 
 /**
@@ -2526,6 +2692,32 @@ function applySafetyGuardrails(patientContext, derived, result) {
       rationale: 'Carbamazepine can cause severe skin reactions (SJS/TEN) and bone marrow suppression.',
       nextSteps: ['Counsel to stop medication and seek urgent care for rash, fever, mouth sores, bleeding, or infection.'],
       ref: '4'
+    });
+  }
+
+  // Drug-Drug Interaction Checking (NEW v1.2.1)
+  if (medications.length >= 2) {
+    const interactions = checkDrugDrugInteractions(medications);
+    interactions.forEach(interaction => {
+      if (interaction.severity === 'high') {
+        result.warnings.push({
+          id: interaction.id,
+          severity: 'high',
+          text: interaction.text,
+          rationale: interaction.rationale,
+          nextSteps: interaction.nextSteps || [],
+          ref: 'drug_interaction'
+        });
+      } else {
+        result.prompts.push({
+          id: interaction.id,
+          severity: interaction.severity || 'medium',
+          text: interaction.text,
+          rationale: interaction.rationale,
+          nextSteps: interaction.nextSteps || [],
+          ref: 'drug_interaction'
+        });
+      }
     });
   }
 }

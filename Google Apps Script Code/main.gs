@@ -42,6 +42,122 @@ let phcNamesCache = null;
 let phcNamesCacheTimestamp = null;
 const PHC_CACHE_DURATION = 6 * 60 * 1000; // 5 minutes in milliseconds
 
+// Session management configuration
+const SESSION_PREFIX = 'SESSION_';
+const SESSION_DURATION_MINUTES = 90;
+const PUBLIC_ACTIONS = ['login', 'changePassword'];
+
+function getSessionStore() {
+  return PropertiesService.getScriptProperties();
+}
+
+function cleanupExpiredSessions() {
+  try {
+    const props = getSessionStore().getProperties();
+    const now = Date.now();
+    Object.keys(props).forEach(key => {
+      if (key.indexOf(SESSION_PREFIX) !== 0) return;
+      try {
+        const data = JSON.parse(props[key] || '{}');
+        if (!data || !data.expiresAt || now > data.expiresAt) {
+          getSessionStore().deleteProperty(key);
+        }
+      } catch (err) {
+        getSessionStore().deleteProperty(key);
+      }
+    });
+  } catch (err) {
+    console.warn('Session cleanup failed:', err);
+  }
+}
+
+function createSession(username, role, assignedPHC, email, name) {
+  cleanupExpiredSessions();
+  const token = Utilities.getUuid().replace(/-/g, '');
+  const expiresAt = Date.now() + SESSION_DURATION_MINUTES * 60 * 1000;
+  const sessionData = {
+    username: username || '',
+    role: role || '',
+    assignedPHC: assignedPHC || '',
+    email: email || '',
+    name: name || '',
+    expiresAt: expiresAt
+  };
+  getSessionStore().setProperty(SESSION_PREFIX + token, JSON.stringify(sessionData));
+  return { token, expiresAt, sessionData };
+}
+
+function refreshSession(token, sessionData) {
+  if (!token || !sessionData) return;
+  sessionData.expiresAt = Date.now() + SESSION_DURATION_MINUTES * 60 * 1000;
+  getSessionStore().setProperty(SESSION_PREFIX + token, JSON.stringify(sessionData));
+}
+
+function getSessionData(token) {
+  if (!token) return null;
+  const raw = getSessionStore().getProperty(SESSION_PREFIX + token);
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw);
+    if (!data || !data.expiresAt || Date.now() > data.expiresAt) {
+      getSessionStore().deleteProperty(SESSION_PREFIX + token);
+      return null;
+    }
+    refreshSession(token, data);
+    return data;
+  } catch (err) {
+    getSessionStore().deleteProperty(SESSION_PREFIX + token);
+    return null;
+  }
+}
+
+function extractAuthToken(e, body) {
+  if (body) {
+    if (body.sessionToken) return body.sessionToken;
+    if (body.token) return body.token;
+    if (body.authToken) return body.authToken;
+  }
+  if (e && e.parameter) {
+    if (e.parameter.sessionToken) return e.parameter.sessionToken;
+    if (e.parameter.token) return e.parameter.token;
+    if (e.parameter.authToken) return e.parameter.authToken;
+  }
+  return null;
+}
+
+function getAuthContextFromRequest(e, body) {
+  const token = extractAuthToken(e, body);
+  if (!token) return null;
+  const session = getSessionData(token);
+  if (!session) return null;
+  return {
+    token,
+    username: session.username || '',
+    role: session.role || '',
+    assignedPHC: session.assignedPHC || '',
+    email: session.email || '',
+    name: session.name || ''
+  };
+}
+
+function throwUnauthorized() {
+  const err = new Error('Authentication required');
+  err.code = 'unauthorized';
+  throw err;
+}
+
+function requireAuthContext(e, body) {
+  const ctx = getAuthContextFromRequest(e, body);
+  if (!ctx) {
+    throwUnauthorized();
+  }
+  return ctx;
+}
+
+function isPublicAction(action) {
+  return PUBLIC_ACTIONS.indexOf(action) !== -1;
+}
+
 /**
  * Format a Date object (or date-parsable string) as DD/MM/YYYY
  * @param {Date|string} d
@@ -98,8 +214,17 @@ function getPatientById(patientId) {
 function doGet(e) {
   let result = null;
   try {
-    const action = e.parameter.action;
-    
+    const action = e && e.parameter ? e.parameter.action : null;
+    if (!action) {
+      result = { status: 'error', message: 'Invalid or missing action' };
+      return createCorsJsonResponse(result);
+    }
+
+    const authContext = isPublicAction(action) ? null : requireAuthContext(e, null);
+    const actingUser = authContext ? authContext.username : '';
+    const actingRole = authContext ? authContext.role : '';
+    const actingPHC = authContext ? authContext.assignedPHC : '';
+
     // Action handlers
     if (action === 'getActivePHCNames') {
       result = { status: 'success', data: getActivePHCNames() };
@@ -109,11 +234,8 @@ function doGet(e) {
       // Read all patients then apply server-side access control to avoid leaking PII
       var allPatients = getSheetData(PATIENTS_SHEET_NAME);
       // Apply role/PHC filtering if username/role params are provided
-  var user = (e.parameter && e.parameter.username) ? e.parameter.username : '';
-  var role = (e.parameter && e.parameter.role) ? e.parameter.role : '';
-  var assignedPHC = (e.parameter && e.parameter.assignedPHC) ? e.parameter.assignedPHC : '';
       try {
-        var filtered = filterDataByUserAccess(allPatients, user, role, assignedPHC);
+        var filtered = filterDataByUserAccess(allPatients, actingUser, actingRole, actingPHC);
         // Normalize patient objects to provide canonical ID strings and PatientStatus values
         try {
           filtered = filtered.map(function(p) { return normalizePatientForClient(p); });
@@ -122,7 +244,7 @@ function doGet(e) {
           console.warn('Patient normalization failed:', normErr);
         }
         // De-identify for viewer role
-        if (role === 'viewer') {
+        if (actingRole === 'viewer') {
           filtered = filtered.map(function(p) {
             return Object.assign({}, p, { PatientName: 'REDACTED', Phone: '', patientAddress: '' });
           });
@@ -133,11 +255,8 @@ function doGet(e) {
       }
     } else if (action === 'getFollowUps') {
   var allFollowUps = getSheetData(FOLLOWUPS_SHEET_NAME);
-  var user2 = (e.parameter && e.parameter.username) ? e.parameter.username : '';
-  var role2 = (e.parameter && e.parameter.role) ? e.parameter.role : '';
-  var assignedPHC2 = (e.parameter && e.parameter.assignedPHC) ? e.parameter.assignedPHC : '';
       try {
-        var filteredFUs = filterFollowUpsByUserAccess(allFollowUps, user2, role2, assignedPHC2);
+        var filteredFUs = filterFollowUpsByUserAccess(allFollowUps, actingUser, actingRole, actingPHC);
         result = { status: 'success', data: filteredFUs };
       } catch (err) {
         result = { status: 'error', message: 'Failed to filter follow-ups: ' + (err && err.message ? err.message : String(err)) };
@@ -211,9 +330,9 @@ function doGet(e) {
         // Pass the patientContext directly - cdsEvaluatePublic can handle v1.2 structured format
         var input = { 
           patientContext: pc,
-          username: e.parameter.username || 'anonymous',
-          role: e.parameter.role || 'unknown',
-          phc: e.parameter.assignedPHC || e.parameter.phc || '',
+          username: actingUser || 'anonymous',
+          role: actingRole || 'unknown',
+          phc: actingPHC || e.parameter.phc || '',
           clientVersion: e.parameter.clientVersion || 'unknown'
         };
         
@@ -340,7 +459,7 @@ function doGet(e) {
         }
         // Ensure AddedBy is set if not provided
         if (!patientData.AddedBy) {
-          patientData.AddedBy = e.parameter.username || 'Unknown';
+          patientData.AddedBy = actingUser || 'Unknown';
         }
         // Ensure NextFollowUpDate is set if not provided
         if (!patientData.NextFollowUpDate) {
@@ -436,7 +555,7 @@ function doGet(e) {
         }
         // Ensure AddedBy is set if not provided
         if (!draftData.AddedBy) {
-          draftData.AddedBy = e.parameter.username || 'Unknown';
+          draftData.AddedBy = actingUser || 'Unknown';
         }
         // Ensure NextFollowUpDate is set if not provided
         if (!draftData.NextFollowUpDate) {
@@ -469,11 +588,15 @@ function doGet(e) {
       result = { status: 'error', message: 'Invalid or missing action: ' + action };
     }
   } catch (error) {
-    result = {
-      status: 'error',
-      message: error.message,
-      stack: error.stack
-    };
+    if (error && error.code === 'unauthorized') {
+      result = { status: 'error', code: 'unauthorized', message: error.message || 'Authentication required' };
+    } else {
+      result = {
+        status: 'error',
+        message: error.message,
+        stack: error.stack
+      };
+    }
   }
   // Handle response formatting and CORS
   if (e && e.parameter && e.parameter.callback) {
@@ -511,7 +634,18 @@ function doPost(e) {
     var action = body.action || (e.parameter && e.parameter.action);
     if (!action) {
       result = { status: 'error', message: 'Invalid or missing action: ' + action };
-    } else if (action === 'getFollowUpPrompts') {
+    }
+
+    if (result) {
+      return createCorsJsonResponse(result);
+    }
+
+    const authContext = isPublicAction(action) ? null : requireAuthContext(e, body);
+    const actingUser = authContext ? authContext.username : '';
+    const actingRole = authContext ? authContext.role : '';
+    const actingPHC = authContext ? authContext.assignedPHC : '';
+
+    if (action === 'getFollowUpPrompts') {
       result = getFollowUpPrompts(body);
     } else if (action === 'testCDS') {
       result = testCDS(body);
@@ -582,9 +716,9 @@ function doPost(e) {
         // Pass the patientContext directly - cdsEvaluatePublic can handle v1.2 structured format
         var input = { 
           patientContext: pc,
-          username: body.username || 'anonymous',
-          role: body.role || 'unknown',
-          phc: body.assignedPHC || body.phc || '',
+          username: actingUser || 'anonymous',
+          role: actingRole || 'unknown',
+          phc: actingPHC || body.phc || '',
           clientVersion: body.clientVersion || 'unknown'
         };
         
@@ -610,7 +744,7 @@ function doPost(e) {
           try {
             var patientId = body.patientId || body.patientId || (e.parameter && e.parameter.patientId);
             var newFreq = body.followFrequency || body.followFrequency || (e.parameter && e.parameter.followFrequency);
-            var userEmail = body.userEmail || body.user || (e.parameter && e.parameter.userEmail) || 'unknown';
+            var userEmail = authContext ? (authContext.email || authContext.username || 'unknown') : 'unknown';
             if (!patientId || !newFreq) {
               result = { status: 'error', message: 'Missing patientId or followFrequency' };
             } else {
@@ -673,7 +807,7 @@ function doPost(e) {
           }
           // Ensure AddedBy is set if not provided
           if (!patientData.AddedBy) {
-            patientData.AddedBy = body.username || 'Unknown';
+            patientData.AddedBy = actingUser || 'Unknown';
           }
           // Ensure NextFollowUpDate is set if not provided
           if (!patientData.NextFollowUpDate) {
@@ -750,7 +884,7 @@ function doPost(e) {
           }
           // Ensure AddedBy is set if not provided
           if (!draftData.AddedBy) {
-            draftData.AddedBy = body.username || 'Unknown';
+            draftData.AddedBy = actingUser || 'Unknown';
           }
           // Ensure NextFollowUpDate is set if not provided
           if (!draftData.NextFollowUpDate) {
@@ -955,7 +1089,11 @@ function doPost(e) {
       result = { status: 'error', message: 'Invalid or missing action: ' + action };
     }
   } catch (err) {
-    result = { status: 'error', message: err && err.message ? err.message : String(err) };
+    if (err && err.code === 'unauthorized') {
+      result = { status: 'error', code: 'unauthorized', message: err.message || 'Authentication required' };
+    } else {
+      result = { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
   }
   
   // Add server-side handlers for login and change password
@@ -1145,7 +1283,12 @@ function doPost(e) {
                 // Do not reveal whether username exists; this error indicates role mismatch only
                 result = { status: 'error', code: 'role_not_permitted', message: 'Selected role is not available for this account. Please choose a different role or contact admin.' };
               } else {
-                result = { status: 'success', data: found };
+                const session = createSession(found.Username, found.Role, found.PHC, found.Email, found.Name);
+                const responsePayload = Object.assign({}, found, {
+                  sessionToken: session.token,
+                  sessionExpiresAt: session.expiresAt
+                });
+                result = { status: 'success', data: responsePayload };
               }
             } else {
               result = { status: 'error', message: 'Invalid username or password' };

@@ -421,11 +421,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Fetch PHC names dynamically from backend
-    fetchPHCNames().catch(err => {
-        console.warn('fetchPHCNames failed (expected if backend unavailable):', err.message);
-        // App continues to work with empty PHC list - user can still use the system
-    });
+    // Fetch PHC names only if an authenticated session is already present
+    if (typeof window.getSessionToken === 'function' && window.getSessionToken()) {
+        fetchPHCNames().catch(err => {
+            console.warn('fetchPHCNames failed (expected if backend unavailable):', err.message);
+        });
+    }
 
     // Initialize draft handlers (if draft.js loaded)
     try { if (window.DraftModule && typeof window.DraftModule.init === 'function') window.DraftModule.init(); } catch (e) { console.warn('DraftModule init error', e); }
@@ -1201,11 +1202,19 @@ document.querySelectorAll('.role-option').forEach(option => {
         const result = await res.json();
 
         if (result.status === 'success' && result.data) {
-            // Server returns only non-sensitive user data (username, role, phc only)
-            const validUser = result.data;
+            const validUser = Object.assign({}, result.data);
+            const sessionToken = validUser.sessionToken || '';
+            const sessionExpiresAt = validUser.sessionExpiresAt || validUser.sessionExpiry || null;
+            delete validUser.sessionToken;
+            delete validUser.sessionExpiresAt;
+            delete validUser.sessionExpiry;
             const actualRole = validUser.Role || selectedRole;
-            // Keep a minimal userData array for downstream code
             userData = [validUser];
+            if (sessionToken && typeof window.setSessionToken === 'function') {
+                window.setSessionToken(sessionToken, sessionExpiresAt);
+            } else {
+                console.warn('Login succeeded but no session token was returned by the server.');
+            }
             await handleLoginSuccess(validUser.Username || username, actualRole);
             try { passwordEl.value = ''; } catch (e) { }
         } else {
@@ -1299,6 +1308,11 @@ async function handleLoginSuccess(username, role) {
     updateTabVisibility();
     showTab('dashboard', document.querySelector('.nav-tab'));
 
+    let phcFetchPromise = Promise.resolve();
+    if (typeof fetchPHCNames === 'function') {
+        phcFetchPromise = fetchPHCNames();
+    }
+
     // Wait for dashboard data to load before showing follow-up tab
     try {
         await initializeDashboard();
@@ -1333,6 +1347,12 @@ async function handleLoginSuccess(username, role) {
     } catch (error) {
         console.error('Error initializing dashboard:', error);
         showNotification('Error loading dashboard data. Please refresh the page and try again.', 'error');
+    }
+
+    try {
+        await phcFetchPromise;
+    } catch (err) {
+        console.warn('PHC names failed to load after login:', err);
     }
     // Notify other parts of the app that the user is logged in
     document.dispatchEvent(new CustomEvent('userLoggedIn'));
@@ -1488,29 +1508,50 @@ async function initializeDashboard() {
     }
 }
 
-function logout() {
-    // Reset the viewer add patient toggle state
+function logout(options = {}) {
+    const opts = options || {};
     allowAddPatientForViewer = false;
     setStoredToggleState(false);
-    location.reload();
 
-    const phcDropdownContainer = document.getElementById('phcFollowUpSelectContainer');
-    const phcDropdown = document.getElementById('phcFollowUpSelect');
+    try {
+        if (typeof window.clearSessionToken === 'function') {
+            window.clearSessionToken();
+        }
+    } catch (err) {
+        console.warn('Failed to clear session token during logout:', err);
+    }
 
-    if ((role === 'phc' || role === 'phc_admin') && currentUserPHC) {
-        // Hide dropdown, auto-render for assigned PHC
-        phcDropdownContainer.style.display = 'none';
-        renderFollowUpPatientList(getUserPHC());
-    } else if (role === 'phc') {
-        // Show dropdown for multi-PHC user
-        phcDropdownContainer.style.display = '';
-        phcDropdown.value = '';
-        renderFollowUpPatientList('');
-    } else {
-        // For master_admin/viewer, show dropdown but don't render patient list until PHC is selected
-        phcDropdownContainer.style.display = '';
-        phcDropdown.value = '';
-        // Don't call renderFollowUpPatientList('') here - let user select PHC first
+    currentUserRole = '';
+    currentUserName = '';
+    currentUserPHC = '';
+    currentUser = null;
+    userData = [];
+    patientData = [];
+    followUpsData = [];
+    lastDataFetch = 0;
+
+    try { setPatientData([]); } catch (e) { /* ignore */ }
+    try { setFollowUpsData([]); } catch (e) { /* ignore */ }
+
+    const dashboard = document.getElementById('dashboardScreen');
+    const loginScreen = document.getElementById('loginScreen');
+    if (dashboard) dashboard.style.display = 'none';
+    if (loginScreen) loginScreen.style.display = 'block';
+
+    try { hideLoader(); } catch (err) { /* ignore */ }
+
+    if (!opts.silent && !opts.skipToast) {
+        showNotification('You have been logged out.', 'info');
+    }
+
+    try {
+        document.dispatchEvent(new CustomEvent('userLoggedOut'));
+    } catch (err) {
+        console.warn('Failed to dispatch userLoggedOut event:', err);
+    }
+
+    if (opts.hardRefresh) {
+        window.location.reload();
     }
 }
 
@@ -5518,6 +5559,12 @@ function closeAdvancedAnalyticsModal() {
 // --- Fetch PHC names from backend ---
 async function fetchPHCNames() {
     try {
+        const token = (typeof window.getSessionToken === 'function') ? window.getSessionToken() : '';
+        if (!token) {
+            console.info('fetchPHCNames: session token not available, skipping request until login completes.');
+            return [];
+        }
+
         // Show loading state for PHC dropdowns
         PHC_DROPDOWN_IDS.forEach(dropdownId => {
             const dropdown = document.getElementById(dropdownId);
@@ -5537,7 +5584,7 @@ async function fetchPHCNames() {
             console.log('fetchPHCNames: Using cached PHC names');
             const phcNames = JSON.parse(cachedPHCs);
             populatePHCDropdowns(phcNames);
-            return;
+            return phcNames;
         }
 
         console.log('fetchPHCNames: Fetching from backend...');
@@ -5617,6 +5664,8 @@ async function fetchPHCNames() {
 
             // Populate dropdowns with the PHC names
             populatePHCDropdowns(activePHCNames);
+
+            return activePHCNames;
         } else {
             throw new Error('No active PHCs found');
         }

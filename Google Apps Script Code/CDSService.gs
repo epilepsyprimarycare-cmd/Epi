@@ -390,6 +390,220 @@ const MASTER_ALERT_LIBRARY = {
 };
 
 /**
+ * Comprehensive Drug-Drug Interaction Matrix for Epilepsy Management
+ * Maps pairwise interactions between common ASMs and other medications
+ */
+const DRUG_INTERACTION_MATRIX = {
+  // Carbamazepine interactions
+  'carbamazepine': {
+    'contraception': {
+      severity: 'high',
+      title: 'CARBAMAZEPINE-CONTRACEPTION INTERACTION',
+      text: 'Carbamazepine reduces hormonal contraceptive efficacy by 40-50%.',
+      rationale: 'Enzyme induction increases oral contraceptive metabolism, increasing pregnancy risk.',
+      nextSteps: ['Counsel on alternative contraception (IUD, barrier, or injectable).', 'Monitor for breakthrough bleeding.', 'Discuss pregnancy prevention strategies.'],
+      references: ['WHO Contraception Guidelines', 'NICE Drug Interactions']
+    },
+    'rifampicin': {
+      severity: 'high',
+      title: 'CARBAMAZEPINE-RIFAMPICIN INTERACTION',
+      text: 'Concurrent use significantly reduces carbamazepine levels.',
+      rationale: 'Mutual enzyme induction may reduce seizure control.',
+      nextSteps: ['Monitor carbamazepine levels closely.', 'Consider alternative TB therapy if possible.', 'Adjust carbamazepine dose as needed.'],
+      references: ['CDC TB and Epilepsy Drug Interactions', 'ILAE TB Guidelines']
+    },
+    'valproate': {
+      severity: 'medium',
+      title: 'CARBAMAZEPINE-VALPROATE COMBINATION',
+      text: 'Combination generally safe but less predictable than monotherapy.',
+      rationale: 'Mild enzyme induction but manageable in clinical practice.',
+      nextSteps: ['Monitor both drug levels if available.', 'Watch for additive neurotoxicity.', 'Regular seizure control assessment.'],
+      references: ['ILAE Polytherapy Guidelines', 'Rational Polytherapy Combinations']
+    },
+    'phenytoin': {
+      severity: 'medium',
+      title: 'CARBAMAZEPINE-PHENYTOIN INTERACTION',
+      text: 'Mutual enzyme induction may alter both drug levels.',
+      rationale: 'Unpredictable pharmacokinetics; combination often avoided.',
+      nextSteps: ['Consider alternative ASM.', 'If necessary, monitor both drug levels.', 'Assess seizure control closely.'],
+      references: ['ILAE Treatment Guidelines', 'ASM Combination Studies']
+    },
+    'warfarin': {
+      severity: 'high',
+      title: 'CARBAMAZEPINE-WARFARIN INTERACTION',
+      text: 'Carbamazepine increases warfarin metabolism, reducing anticoagulation.',
+      rationale: 'Enzyme induction decreases warfarin efficacy, increasing thrombotic risk.',
+      nextSteps: ['Monitor INR closely (initially weekly, then every 2-4 weeks).', 'Increase warfarin dose as needed to maintain INR 2-3.', 'Specialist coordination required.'],
+      references: ['FDA Warfarin Interactions', 'CHEST Anticoagulation Guidelines']
+    }
+  },
+
+  // Valproate interactions
+  'valproate': {
+    'lamotrigine': {
+      severity: 'medium',
+      title: 'VALPROATE-LAMOTRIGINE INTERACTION',
+      text: 'Valproate inhibits lamotrigine metabolism, increasing levels 50-100%.',
+      rationale: 'Risk of lamotrigine toxicity (ataxia, diplopia) at standard doses.',
+      nextSteps: ['Use lower lamotrigine dose: start 25 mg/day (vs. standard 50 mg/day).', 'Slower titration (25 mg every 2 weeks).', 'Monitor for lamotrigine toxicity signs.'],
+      references: ['FDA Lamotrigine Dosing with Valproate', 'ILAE Polytherapy Guidelines']
+    },
+    'phenobarbital': {
+      severity: 'medium',
+      title: 'VALPROATE-PHENOBARBITAL INTERACTION',
+      text: 'Valproate increases phenobarbital levels; phenobarbital increases valproate metabolism.',
+      rationale: 'Complex bidirectional interaction; levels may be unpredictable.',
+      nextSteps: ['Monitor both drug levels if possible.', 'Watch for phenobarbital toxicity (sedation, ataxia).', 'Consider alternative polytherapy combination.'],
+      references: ['ASM Pharmacology References', 'ILAE Polytherapy Studies']
+    },
+    'aspirin': {
+      severity: 'medium',
+      title: 'VALPROATE-ASPIRIN INTERACTION',
+      text: 'High-dose aspirin may displace valproate from protein binding, increasing levels.',
+      rationale: 'Risk of valproate toxicity if aspirin used chronically.',
+      nextSteps: ['Avoid high-dose aspirin (>3g/day).', 'Consider acetaminophen for pain.', 'Monitor for valproate toxicity if aspirin needed.'],
+      references: ['Valproate Package Insert', 'Drug Interaction Databases']
+    }
+  },
+
+  // Phenytoin interactions
+  'phenytoin': {
+    'warfarin': {
+      severity: 'high',
+      title: 'PHENYTOIN-WARFARIN INTERACTION',
+      text: 'Phenytoin increases warfarin metabolism, reducing anticoagulation effect.',
+      rationale: 'Enzyme induction decreases warfarin efficacy, increasing thrombotic risk.',
+      nextSteps: ['Monitor INR closely.', 'Increase warfarin dose as needed.', 'Specialist coordination required.'],
+      references: ['FDA Warfarin Interactions', 'CHEST Guidelines']
+    },
+    'contraception': {
+      severity: 'high',
+      title: 'PHENYTOIN-CONTRACEPTION INTERACTION',
+      text: 'Phenytoin reduces hormonal contraceptive efficacy.',
+      rationale: 'Enzyme induction increases oral contraceptive metabolism.',
+      nextSteps: ['Counsel on alternative contraception.', 'Monitor for breakthrough bleeding.'],
+      references: ['WHO Contraception Guidelines']
+    }
+  },
+
+  // Phenobarbital interactions
+  'phenobarbital': {
+    'contraception': {
+      severity: 'high',
+      title: 'PHENOBARBITAL-CONTRACEPTION INTERACTION',
+      text: 'Phenobarbital reduces hormonal contraceptive efficacy.',
+      rationale: 'Enzyme induction decreases oral contraceptive effectiveness.',
+      nextSteps: ['Counsel on alternative contraception (IUD preferred).', 'Higher-dose hormonal contraception if oral route chosen.'],
+      references: ['WHO Contraception Guidelines', 'NICE Drug Interactions']
+    }
+  },
+
+  // Levetiracetam (minimal interactions)
+  'levetiracetam': {
+    'note': {
+      severity: 'info',
+      title: 'LEVETIRACETAM - MINIMAL INTERACTIONS',
+      text: 'Levetiracetam has minimal drug-drug interactions.',
+      rationale: 'Not metabolized by cytochrome P450; does not induce or inhibit other drugs.',
+      nextSteps: ['Safe option for polytherapy.', 'No dose adjustments needed for other medications.'],
+      references: ['Levetiracetam Package Insert', 'ILAE Pharmacology']
+    }
+  },
+
+  // Clobazam interactions
+  'clobazam': {
+    'note': {
+      severity: 'info',
+      title: 'CLOBAZAM - MINIMAL INTERACTIONS',
+      text: 'Clobazam has minimal significant drug interactions.',
+      rationale: 'Limited CYP450 involvement.',
+      nextSteps: ['Generally safe in polytherapy.', 'Monitor for additive sedation.'],
+      references: ['Clobazam Package Insert', 'ILAE Studies']
+    }
+  }
+};
+
+/**
+ * Check for drug-drug interactions between medications
+ * @param {Array} medications - List of medications (strings or objects)
+ * @returns {Array} Array of interaction warnings
+ */
+function checkDrugDrugInteractions(medications) {
+  if (!medications || !Array.isArray(medications) || medications.length < 2) {
+    return [];
+  }
+
+  const interactions = [];
+  const medNames = medications.map(med => {
+    if (typeof med === 'string') return med.toLowerCase();
+    return (med.name || '').toLowerCase();
+  });
+
+  // Check all pairwise combinations
+  for (let i = 0; i < medNames.length; i++) {
+    for (let j = i + 1; j < medNames.length; j++) {
+      const drug1 = medNames[i];
+      const drug2 = medNames[j];
+
+      // Normalize drug names to matrix keys
+      let matrix1Key = null;
+      let matrix2Key = null;
+
+      // Check if drug1 has interactions with drug2
+      for (const key in DRUG_INTERACTION_MATRIX) {
+        if (drug1.includes(key) || key.includes(drug1)) {
+          matrix1Key = key;
+          break;
+        }
+      }
+
+      // If found in matrix, check for specific interaction
+      if (matrix1Key && DRUG_INTERACTION_MATRIX[matrix1Key]) {
+        for (const interactionKey in DRUG_INTERACTION_MATRIX[matrix1Key]) {
+          if (interactionKey === 'note') continue; // Skip note entries
+          if (drug2.includes(interactionKey) || interactionKey.includes(drug2)) {
+            const interaction = DRUG_INTERACTION_MATRIX[matrix1Key][interactionKey];
+            interactions.push({
+              ...interaction,
+              id: `drug_interaction_${matrix1Key}_${interactionKey}`,
+              severity: interaction.severity || 'medium'
+            });
+            break;
+          }
+        }
+      }
+
+      // Check reverse direction (drug2 with drug1)
+      if (interactions.length === i * medNames.length + j) { // Only if not already found
+        for (const key in DRUG_INTERACTION_MATRIX) {
+          if (drug2.includes(key) || key.includes(drug2)) {
+            matrix2Key = key;
+            break;
+          }
+        }
+
+        if (matrix2Key && DRUG_INTERACTION_MATRIX[matrix2Key]) {
+          for (const interactionKey in DRUG_INTERACTION_MATRIX[matrix2Key]) {
+            if (interactionKey === 'note') continue;
+            if (drug1.includes(interactionKey) || interactionKey.includes(drug1)) {
+              const interaction = DRUG_INTERACTION_MATRIX[matrix2Key][interactionKey];
+              interactions.push({
+                ...interaction,
+                id: `drug_interaction_${matrix2Key}_${interactionKey}`,
+                severity: interaction.severity || 'medium'
+              });
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return interactions;
+}
+
+/**
  * Get CDS system configuration
  * Accessible to all authenticated users
  * @returns {Object} Response with configuration data

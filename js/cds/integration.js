@@ -329,24 +329,34 @@ class CDSIntegration {
         treatmentRecommendations = {};
       }
 
-      // Transform result to standard format
+      // Normalize backend alerts into severity buckets then map back to legacy structures for UI reuse
+      const alertBuckets = this.normalizeAlertBuckets(result);
+      const flattenedStandardAlerts = this.flattenAlertBuckets(alertBuckets);
+      const legacyAlerts = flattenedStandardAlerts
+        .map(alert => this.convertStandardAlertToLegacy(alert))
+        .filter(Boolean);
+
+      const warningsArray = legacyAlerts.filter(alert => this.isHighSeverity(alert.severity));
+      const promptsArray = legacyAlerts.filter(alert => !this.isHighSeverity(alert.severity));
+      const recommendationsList = Array.isArray(result.recommendationsList) && result.recommendationsList.length
+        ? result.recommendationsList
+        : (treatmentRecommendations.recommendationsList || promptsArray);
+
       const analysis = {
-        success: true,
-        warnings: result.warnings || [],
-        prompts: result.prompts || [],
-        doseFindings: enhancedDoseFindings, // backend first, fallback to local only if offline
+        success: result.success !== false,
+        warnings: warningsArray,
+        prompts: promptsArray,
+        alerts: legacyAlerts,
+        alertsBySeverity: alertBuckets,
+        doseFindings: enhancedDoseFindings.length > 0 ? enhancedDoseFindings : (result.doseFindings || []),
         version: result.version,
-        
-        // Enhanced v1.2 fields
         treatmentRecommendations: treatmentRecommendations,
         plan: result.plan || treatmentRecommendations.plan || {},
-        // Provide a recommendationsList for UI components expecting an array
-        recommendationsList: (result.recommendationsList || result.treatmentRecommendations?.recommendationsList) || treatmentRecommendations.recommendationsList || [],
+        recommendationsList,
         specialConsiderations: result.specialConsiderations || [],
-        
-        // Legacy compatibility fields
-        alerts: [...(result.warnings || []), ...(result.prompts || [])],
-        medicationAnalyses: enhancedDoseFindings.length > 0 ? enhancedDoseFindings : (result.doseFindings || [])
+        dataQuality: result.dataQuality || { missingFields: [], completeness: 100 },
+        metadata: result.metadata || {},
+        standardResponse: result
       };
       
       // Store for telemetry AFTER analysis is created
@@ -384,9 +394,9 @@ class CDSIntegration {
         try {
           this.telemetry.recordEvent('cds_analysis_completed', {
             duration,
-            warningCount: result.warnings?.length || 0,
-            promptCount: result.prompts?.length || 0,
-            doseCount: result.doseFindings?.length || 0,
+            warningCount: warningsArray.length,
+            promptCount: promptsArray.length,
+            doseCount: analysis.doseFindings.length,
             filteredWarningCount: analysis.warnings.length,
             filteredPromptCount: analysis.prompts.length,
             version: result.version,
@@ -420,9 +430,9 @@ class CDSIntegration {
           patientHint: patientContext.patientName ? String(patientContext.patientName).slice(0,32) : this.generatePatientHint(patientContext),
           kbVersion: result.version || this.config?.kbVersion,
           summary: {
-            warningCount: result.warnings?.length || 0,
-            promptCount: result.prompts?.length || 0,
-            doseFindings: result.doseFindings?.length || 0
+            warningCount: warningsArray.length,
+            promptCount: promptsArray.length,
+            doseFindings: analysis.doseFindings.length
           }
         };
 
@@ -1541,6 +1551,136 @@ class CDSIntegration {
         this._onProceedCallback = null; // Use once
       });
     }
+  }
+
+  normalizeAlertSeverity(severity) {
+    const value = (severity || '').toString().toLowerCase();
+    if (value === 'critical') return 'critical';
+    if (value === 'high' || value === 'severe') return 'high';
+    if (value === 'medium' || value === 'warning' || value === 'warn') return 'medium';
+    if (value === 'low') return 'low';
+    return 'info';
+  }
+
+  normalizeAlertBuckets(result) {
+    const buckets = { critical: [], high: [], medium: [], low: [], info: [] };
+    if (!result) return buckets;
+
+    const version = result.version || this.kbMetadata?.version || this.config?.kbVersion || '1.2.0';
+
+    if (result.alerts && typeof result.alerts === 'object') {
+      Object.keys(buckets).forEach(level => {
+        const entries = Array.isArray(result.alerts[level]) ? result.alerts[level] : [];
+        buckets[level] = entries.map(alert => this.ensureStandardAlertShape(alert, version)).filter(Boolean);
+      });
+      return buckets;
+    }
+
+    const addLegacyList = (list, fallbackCategory) => {
+      (list || []).forEach(entry => {
+        const standard = this.convertLegacyAlertToStandard(entry, fallbackCategory, version);
+        if (standard) {
+          buckets[standard.severity].push(standard);
+        }
+      });
+    };
+
+    addLegacyList(result.warnings, 'safety');
+    addLegacyList(result.prompts, 'optimization');
+    if (Array.isArray(result.treatmentRecommendations)) {
+      addLegacyList(result.treatmentRecommendations, 'optimization');
+    }
+
+    return buckets;
+  }
+
+  ensureStandardAlertShape(alert, version) {
+    if (!alert) return null;
+    const severity = this.normalizeAlertSeverity(alert.severity);
+    const actions = Array.isArray(alert.actions)
+      ? alert.actions
+      : (Array.isArray(alert.nextSteps) ? alert.nextSteps : []);
+
+    return {
+      id: alert.id || alert.ruleId || ('alert_' + Math.random().toString(36).slice(2)),
+      version: alert.version || version || '1.2.0',
+      severity,
+      category: alert.category || 'optimization',
+      priority: typeof alert.priority === 'number' ? alert.priority : (severity === 'critical' ? 1 : severity === 'high' ? 2 : 3),
+      title: alert.title || alert.name || 'Clinical Alert',
+      message: alert.message || alert.text || '',
+      rationale: alert.rationale || '',
+      actions,
+      references: alert.references || [],
+      dismissible: alert.dismissible !== false,
+      requiresAcknowledgment: alert.requiresAcknowledgment || severity === 'critical',
+      timestamp: alert.timestamp || new Date().toISOString(),
+      ruleIds: Array.isArray(alert.ruleIds) ? alert.ruleIds : (alert.ruleId ? [alert.ruleId] : []),
+      doseRecommendation: alert.doseRecommendation || alert.details || null,
+      drugInteraction: alert.drugInteraction || null
+    };
+  }
+
+  convertLegacyAlertToStandard(entry, fallbackCategory, version) {
+    if (!entry) return null;
+    const severity = this.normalizeAlertSeverity(entry.severity || (fallbackCategory === 'safety' ? 'high' : 'medium'));
+    const actions = Array.isArray(entry.nextSteps) ? entry.nextSteps : (entry.recommendation ? [entry.recommendation] : []);
+
+    return {
+      id: entry.id || entry.ruleId || ('legacy_' + Math.random().toString(36).slice(2)),
+      version: version || '1.2.0',
+      severity,
+      category: entry.category || fallbackCategory || 'optimization',
+      priority: typeof entry.priority === 'number' ? entry.priority : (severity === 'critical' ? 1 : severity === 'high' ? 2 : 3),
+      title: entry.title || entry.name || 'Clinical Alert',
+      message: entry.text || entry.message || '',
+      rationale: entry.rationale || '',
+      actions,
+      references: entry.references || [],
+      dismissible: entry.dismissible !== false,
+      requiresAcknowledgment: severity === 'critical',
+      timestamp: entry.timestamp || new Date().toISOString(),
+      ruleIds: entry.ruleIds || (entry.ruleId ? [entry.ruleId] : []),
+      doseRecommendation: entry.details || null,
+      drugInteraction: entry.drugInteraction || null
+    };
+  }
+
+  flattenAlertBuckets(buckets) {
+    const order = ['critical', 'high', 'medium', 'low', 'info'];
+    return order.reduce((acc, level) => {
+      if (Array.isArray(buckets[level])) {
+        acc.push(...buckets[level]);
+      }
+      return acc;
+    }, []);
+  }
+
+  convertStandardAlertToLegacy(alert) {
+    if (!alert) return null;
+    const title = alert.title || '';
+    const message = alert.message || '';
+    const text = title && message ? `${title}: ${message}` : (message || title);
+    return {
+      id: alert.id,
+      severity: alert.severity,
+      text: text ? text.trim() : '',
+      title,
+      rationale: alert.rationale,
+      nextSteps: Array.isArray(alert.actions) ? alert.actions : [],
+      references: alert.references || [],
+      dismissible: alert.dismissible,
+      requiresAcknowledgment: alert.requiresAcknowledgment,
+      ruleId: Array.isArray(alert.ruleIds) && alert.ruleIds.length ? alert.ruleIds[0] : null,
+      category: alert.category,
+      priority: alert.priority,
+      rawAlert: alert
+    };
+  }
+
+  isHighSeverity(severity) {
+    const normalized = this.normalizeAlertSeverity(severity);
+    return normalized === 'critical' || normalized === 'high';
   }
 
   // Note: array-based displayAlerts implementation removed — unified implementation above handles both analysis objects and arrays.

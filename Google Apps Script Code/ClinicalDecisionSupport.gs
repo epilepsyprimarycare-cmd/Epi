@@ -1853,6 +1853,7 @@ function persistKBRulesToSheet(kb) {
  * @returns {Object} Standardized CDS response
  */
 function evaluateCDS(patientData) {
+  let patientContext = null;
   try {
     // Initialize result structure with enforced output order
     const result = {
@@ -1877,7 +1878,7 @@ function evaluateCDS(patientData) {
     };
 
     // Step 1: Input Validation, Normalization, and Context Derivation
-    const patientContext = normalizePatientContext(patientData);
+    patientContext = normalizePatientContext(patientData);
     if (!patientContext) {
       result.prompts.push({
         id: 'invalidPatientData',
@@ -1951,11 +1952,15 @@ function evaluateCDS(patientData) {
     result.prompts = dedupePrompts(result.prompts);
     result.warnings = dedupePrompts(result.warnings);
 
-    // Enforce output structure and order
-    return enforceOutputStructure(result);
+    // Enforce output structure and order, then normalize to the shared envelope
+    const legacyResult = enforceOutputStructure(result);
+    if (typeof CDSResponseFormatter !== 'undefined' && CDSResponseFormatter.formatResponse) {
+      return CDSResponseFormatter.formatResponse(legacyResult, patientContext || patientData || {});
+    }
+    return legacyResult;
   } catch (error) {
     Logger.log('CDS evaluation error: ' + error.toString());
-    return enforceOutputStructure({
+    const fallback = enforceOutputStructure({
       version: '1.2.0',
       warnings: [],
       prompts: [{
@@ -1969,6 +1974,12 @@ function evaluateCDS(patientData) {
       plan: { monotherapySuggestion: null, addonSuggestion: null, referral: null },
       meta: { classificationStatus: 'unknown', isElderly: false, isChild: false, reproductivePotential: false, isPregnant: false, adherenceGating: false, dashboardCriticalAlert: false }
     });
+
+    if (typeof CDSResponseFormatter !== 'undefined' && CDSResponseFormatter.formatResponse) {
+      return CDSResponseFormatter.formatResponse(fallback, patientContext || patientData || {});
+    }
+
+    return fallback;
   }
 }
 

@@ -421,6 +421,335 @@ const FormValidator = {
 };
 
 /**
+ * CDS-specific validation utilities
+ * Handles recommendation deduplication, text processing, and data completeness checks
+ */
+const CDSValidation = {
+  /**
+   * Consolidate and deduplicate CDS recommendations
+   * @param {Array} recommendations - Array of recommendation objects
+   * @returns {Array} Deduplicated and concise recommendations
+   */
+  consolidateRecommendations(recommendations) {
+    if (!Array.isArray(recommendations)) return [];
+
+    const consolidated = [];
+    const seenTexts = new Set();
+
+    for (const rec of recommendations) {
+      if (!rec) continue;
+      const text = (rec.text || '').toLowerCase().trim();
+
+      if (text) {
+        const isDuplicate = Array.from(seenTexts).some(seenText => {
+          const similarity = this.calculateTextSimilarity(text, seenText);
+          const semanticSimilarity = this.calculateSemanticSimilarity(text, seenText);
+          return similarity > 0.7 || semanticSimilarity > 0.8;
+        });
+
+        if (isDuplicate) {
+          console.log('CDS Display: Skipping duplicate recommendation:', text);
+          continue;
+        }
+
+        seenTexts.add(text);
+      }
+
+      const conciseRec = { ...rec };
+      conciseRec.text = this.makeRecommendationConcise(rec.text);
+      if (rec.rationale) {
+        conciseRec.rationale = this.makeRationaleConcise(rec.rationale);
+      }
+
+      consolidated.push(conciseRec);
+    }
+
+    return consolidated;
+  },
+
+  /**
+   * Calculate text similarity using a Jaccard index
+   * @param {string} text1
+   * @param {string} text2
+   * @returns {number} Similarity score between 0 and 1
+   */
+  calculateTextSimilarity(text1, text2) {
+    if (!text1 || !text2) return 0;
+
+    const normalizeText = (text) => String(text).toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const normalized1 = normalizeText(text1);
+    const normalized2 = normalizeText(text2);
+
+    if (normalized1 === normalized2) return 1;
+
+    const words1 = new Set(normalized1.split(' ').filter(word => word.length > 2));
+    const words2 = new Set(normalized2.split(' ').filter(word => word.length > 2));
+
+    if (words1.size === 0 && words2.size === 0) return 1;
+    if (words1.size === 0 || words2.size === 0) return 0;
+
+    const intersection = new Set([...words1].filter(word => words2.has(word)));
+    const union = new Set([...words1, ...words2]);
+    return union.size === 0 ? 0 : intersection.size / union.size;
+  },
+
+  /**
+   * Calculate semantic similarity with clinical heuristics
+   * @param {string} text1
+   * @param {string} text2
+   * @returns {number} Similarity score between 0 and 1
+   */
+  calculateSemanticSimilarity(text1, text2) {
+    if (!text1 || !text2) return 0;
+
+    const normalizeText = (text) => String(text).toLowerCase()
+      .replace(/reported/g, '')
+      .replace(/and monitor/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const normalized1 = normalizeText(text1);
+    const normalized2 = normalizeText(text2);
+
+    if (normalized1 === normalized2) return 1;
+
+    const patterns = [
+      { regex: /no (recent )?seizures?.*continue.*management/i, weight: 0.9 },
+      { regex: /good.*seizure.*control/i, weight: 0.8 },
+      { regex: /continue.*current.*(asm|treatment|medication)/i, weight: 0.8 },
+      { regex: /follow.?up.*planned/i, weight: 0.7 },
+      { regex: /medication.*adherence/i, weight: 0.8 },
+      { regex: /compliance.*medication/i, weight: 0.8 },
+      { regex: /refer.*(tertiary|specialist)/i, weight: 0.9 },
+      { regex: /refer.*care/i, weight: 0.8 }
+    ];
+
+    let totalScore = 0;
+    let patternCount = 0;
+
+    for (const pattern of patterns) {
+      const matches1 = pattern.regex.test(text1);
+      const matches2 = pattern.regex.test(text2);
+
+      if (matches1 && matches2) {
+        totalScore += pattern.weight;
+        patternCount++;
+      } else if (matches1 || matches2) {
+        totalScore += pattern.weight * 0.3;
+        patternCount++;
+      }
+    }
+
+    if (patternCount > 0) {
+      return Math.min(totalScore / patternCount, 1);
+    }
+
+    return this.calculateTextSimilarity(text1, text2);
+  },
+
+  /**
+   * Make recommendation text concise
+   * @param {string} text
+   * @returns {string}
+   */
+  makeRecommendationConcise(text) {
+    if (!text) return text;
+
+    let concise = text
+      .replace(/^Before adding or switching medication,\s*/i, '')
+      .replace(/Continue current management and follow-up as planned\.?/i, 'Continue current management.')
+      .replace(/Seizure freedom since last visit indicates good control\.?/i, 'Good seizure control maintained.')
+      .replace(/No seizures reported since the last visit\.?/i, 'No recent seizures reported.')
+      .replace(/No seizures since last visit\.?/i, 'No recent seizures.')
+      .replace(/Continue current ASM and follow-up as planned\.?/i, 'Continue current ASM.')
+      .replace(/Good seizure control\.?/i, 'Good seizure control.')
+      .replace(/Monitor closely for any changes\.?/i, 'Monitor closely.')
+      .replace(/Regular follow-up is recommended\.?/i, 'Regular follow-up recommended.')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (concise.length > 150) {
+      const sentences = concise.split(/[.!?]+/);
+      if (sentences.length > 1) {
+        concise = sentences[0] + (sentences[0].endsWith('.') ? '' : '.');
+      }
+    }
+
+    return concise;
+  },
+
+  /**
+   * Make rationale concise
+   * @param {string} rationale
+   * @returns {string}
+   */
+  makeRationaleConcise(rationale) {
+    if (!rationale) return rationale;
+
+    return rationale
+      .replace(/Seizure freedom since last visit indicates good control\.?/i, 'Good seizure control.')
+      .replace(/\s+/g, ' ')
+      .trim();
+  },
+
+  /**
+   * Check CDS analysis for missing data prompts
+   * @param {Object} analysis
+   * @returns {{hasMissingData:boolean, missingFields:Object}}
+   */
+  checkMissingDataFields(analysis) {
+    const missingFields = {
+      weight: false,
+      age: false,
+      epilepsyType: false
+    };
+
+    if (!analysis || !Array.isArray(analysis.prompts)) {
+      return { hasMissingData: false, missingFields };
+    }
+
+    const missingDataPatterns = {
+      weight: /weight|body weight|kg|kilogram/i,
+      age: /age|years old|patient age/i,
+      epilepsyType: /epilepsy type|seizure type|epilepsy classification/i
+    };
+
+    let hasMissingDataPrompt = false;
+
+    for (const prompt of analysis.prompts) {
+      const text = (prompt?.text || prompt?.message || '').toLowerCase();
+      if (!text) continue;
+
+      if (text.includes('missing') || text.includes('required') || text.includes('not available') || text.includes('unknown')) {
+        Object.keys(missingDataPatterns).forEach(field => {
+          if (missingDataPatterns[field].test(text)) {
+            missingFields[field] = true;
+            hasMissingDataPrompt = true;
+          }
+        });
+      }
+    }
+
+    return { hasMissingData: hasMissingDataPrompt, missingFields };
+  },
+
+  /**
+   * Highlight missing data fields in UI
+   * @param {Object} missingFields
+   */
+  highlightMissingFields(missingFields = {}) {
+    if (typeof document === 'undefined' || !missingFields) return;
+
+    const fieldMappings = {
+      weight: ['updateWeight', 'weight'],
+      age: ['updateAge', 'age'],
+      epilepsyType: ['epilepsyType']
+    };
+
+    let scrollTarget = null;
+
+    Object.keys(missingFields).forEach(field => {
+      if (!missingFields[field]) return;
+      const fieldIds = fieldMappings[field] || [];
+      fieldIds.forEach(fieldId => {
+        const element = document.getElementById(fieldId);
+        if (!element) return;
+        element.classList.add('missing-data-highlight');
+        if (!scrollTarget) scrollTarget = element;
+        this.addMissingDataIndicator(element, field);
+      });
+    });
+
+    if (scrollTarget) {
+      scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      setTimeout(() => {
+        if (typeof scrollTarget.focus === 'function') {
+          scrollTarget.focus();
+        }
+      }, 1000);
+    }
+
+    this.addMissingDataStyles();
+  },
+
+  /**
+   * Add missing data indicator next to field
+   * @param {HTMLElement} element
+   * @param {string} fieldType
+   */
+  addMissingDataIndicator(element, fieldType) {
+    if (typeof document === 'undefined' || !element || !element.parentNode) return;
+
+    const existingIndicator = element.parentNode.querySelector('.missing-data-indicator');
+    if (existingIndicator) existingIndicator.remove();
+
+    const indicator = document.createElement('div');
+    indicator.className = 'missing-data-indicator';
+    indicator.innerHTML = `
+        <i class="fas fa-exclamation-triangle"></i>
+        <span>Missing ${fieldType} data required for CDS analysis</span>
+    `;
+
+    element.parentNode.insertBefore(indicator, element.nextSibling);
+  },
+
+  /**
+   * Inject CSS styles for missing data highlighting
+   */
+  addMissingDataStyles() {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('missing-data-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'missing-data-styles';
+    style.textContent = `
+        .missing-data-highlight {
+            border: 2px solid #dc3545 !important;
+            box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25) !important;
+            background-color: #fff5f5 !important;
+            animation: missingDataPulse 2s infinite;
+        }
+
+        .missing-data-indicator {
+            background: linear-gradient(135deg, #ffebee, #ffcdd2);
+            border: 1px solid #e57373;
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin-top: 4px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            font-size: 0.9em;
+            color: #c62828;
+        }
+
+        .missing-data-indicator i {
+            margin-right: 8px;
+            color: #d32f2f;
+        }
+
+        @keyframes missingDataPulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 0.5rem rgba(220, 53, 69, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
+            }
+        }
+    `;
+
+    document.head.appendChild(style);
+  }
+};
+
+/**
  * FORM FIELD VALIDATION HELPERS
  * Real-time validation and error display for form fields
  */
@@ -734,6 +1063,7 @@ if (typeof module !== 'undefined' && module.exports) {
     ValidationRules, 
     SecurityUtils, 
     FormValidator,
+    CDSValidation,
     setupFormValidation,
     setupFollowUpFormValidation,
     validatePatientFormBeforeSubmit,
@@ -748,6 +1078,7 @@ if (typeof window !== 'undefined') {
   window.ValidationRules = ValidationRules;
   window.SecurityUtils = SecurityUtils;
   window.FormValidator = FormValidator;
+  window.CDSValidation = CDSValidation;
   window.setupFormValidation = setupFormValidation;
   window.setupFollowUpFormValidation = setupFollowUpFormValidation;
   window.validatePatientFormBeforeSubmit = validatePatientFormBeforeSubmit;

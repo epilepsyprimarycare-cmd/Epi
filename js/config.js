@@ -13,7 +13,7 @@ const ENVIRONMENT = IS_PRODUCTION ? 'production' : 'development';
 // DEPLOYMENT CONFIGURATION
 // =====================================================
 // UPDATE THIS URL WHEN DEPLOYING TO A NEW GOOGLE APPS SCRIPT:
-const DEPLOYMENT_URL = 'https://script.google.com/macros/s/AKfycbyn3ESkhMYqODWBnNXvz9LF5AklKID3X-6wGUFl-cQ0Vf-lJ8gfT4xlx1iBsu6Bk58q/exec';
+const DEPLOYMENT_URL = 'https://script.google.com/macros/s/AKfycbwotwqOMCez7M3tgtbOXErhMEfl8ke9B2O1NWwF8Wmtc6pUofLFZE8J1DayXRHs-Ig/exec';
 
 // =====================================================
 // LOGGER UTILITY (controls console output)
@@ -187,4 +187,5 @@ window.Logger.always(`🚀 Epicare v4 initialized (${ENVIRONMENT})`);
 if (!IS_PRODUCTION) {
   window.Logger.always('⚙️  DEVELOPMENT MODE - Full logging enabled');
   window.Logger.always('📡 Backend:', DEPLOYMENT_URL);
+
 }

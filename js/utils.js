@@ -194,16 +194,43 @@ function parseDateFlexible(dateInput) {
 }
 
 /**
- * Calculate next follow-up date from patient's LastFollowUp and FollowFrequency
+ * Resolve the most recent follow-up date from multiple backend field variants
+ * @param {Object} patient
+ * @returns {Date|null}
+ */
+function getResolvedLastFollowUpDate(patient) {
+    if (!patient) return null;
+    const candidates = [
+        patient.LastFollowUp,
+        patient.LastFollowUpDate,
+        patient.lastFollowUp,
+        patient.lastFollowUpDate,
+        patient.FollowUpDate,
+        patient.followUpDate,
+        patient.currentFollowUpData && (patient.currentFollowUpData.FollowUpDate || patient.currentFollowUpData.followUpDate)
+    ];
+
+    for (const candidate of candidates) {
+        if (!candidate) continue;
+        const parsed = parseDateFlexible(candidate);
+        if (parsed) {
+            parsed.setHours(0, 0, 0, 0);
+            return parsed;
+        }
+    }
+    return null;
+}
+
+/**
+ * Calculate next follow-up date from patient's last follow-up and follow frequency
  * @param {Object} patient
  * @returns {Date|null}
  */
 function calculateNextFollowUpDate(patient) {
-    if (!patient || !patient.LastFollowUp) return null;
-    const lastDate = parseDateFlexible(patient.LastFollowUp);
+    const lastDate = getResolvedLastFollowUpDate(patient);
     if (!lastDate) return null;
     const nextDate = new Date(lastDate);
-    const frequency = (patient.FollowFrequency || patient.followFrequency || 'Monthly').toString().toLowerCase();
+    const frequency = (patient && (patient.FollowFrequency || patient.followFrequency) ? patient.FollowFrequency || patient.followFrequency : 'Monthly').toString().toLowerCase();
     switch (frequency) {
         case 'quarterly':
             nextDate.setMonth(nextDate.getMonth() + 3);
@@ -218,6 +245,7 @@ function calculateNextFollowUpDate(patient) {
             nextDate.setMonth(nextDate.getMonth() + 1);
             break;
     }
+    nextDate.setHours(0, 0, 0, 0);
     return nextDate;
 }
 
@@ -229,28 +257,28 @@ function calculateNextFollowUpDate(patient) {
  * @returns {boolean} True if the follow-up is due for a reset/reminder.
  */
 function checkIfFollowUpNeedsReset(patient) {
-    if (!patient || !patient.FollowUpStatus || !patient.FollowUpStatus.includes('Completed') || !patient.LastFollowUp) {
-        return false;
-    }
-    const lastFollowUp = parseDateFlexible(patient.LastFollowUp);
-    if (!lastFollowUp) return false;
-    lastFollowUp.setHours(0, 0, 0, 0);
-    const nextDueDate = new Date(lastFollowUp.getFullYear(), lastFollowUp.getMonth() + 1, lastFollowUp.getDate());
-    if (isNaN(nextDueDate.getTime())) return false;
-    nextDueDate.setHours(0, 0, 0, 0);
+    if (!patient) return false;
+
+    const nextDueDate = calculateNextFollowUpDate(patient);
+    if (!nextDueDate) return false;
+
     const notificationStartDate = new Date(nextDueDate);
     notificationStartDate.setDate(notificationStartDate.getDate() - 5);
     notificationStartDate.setHours(0, 0, 0, 0);
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    return today >= notificationStartDate && today <= nextDueDate;
+
+    return today >= notificationStartDate;
 }
 
 // Expose on window for other modules
 if (typeof window !== 'undefined') {
+    window.getResolvedLastFollowUpDate = getResolvedLastFollowUpDate;
     window.calculateNextFollowUpDate = calculateNextFollowUpDate;
     window.checkIfFollowUpNeedsReset = checkIfFollowUpNeedsReset;
     window.EpiUtils = window.EpiUtils || {};
+    window.EpiUtils.getResolvedLastFollowUpDate = getResolvedLastFollowUpDate;
     window.EpiUtils.calculateNextFollowUpDate = calculateNextFollowUpDate;
     window.EpiUtils.checkIfFollowUpNeedsReset = checkIfFollowUpNeedsReset;
     window.EpiUtils.parseDateFlexible = parseDateFlexible;

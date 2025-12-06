@@ -4744,12 +4744,14 @@ function buildFollowUpPatientCard(patient, options = {}) {
 
     // Normalize or compute last follow-up from follow-ups if patient LastFollowUp not present
     let computedLastFollowUpFormatted = lastFollowUpFormatted || EpicareI18n.translate('label.never');
+    let lastFollowUpDateObj = null;
     try {
         // Prefer patient.LastFollowUp if available
         const lastFromPatient = patient.LastFollowUp || patient.LastFollowUpDate || patient.lastFollowUp || patient.lastFollowUpDate;
         if (lastFromPatient) {
             const parsed = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(lastFromPatient) : (new Date(lastFromPatient));
             if (parsed && !isNaN(parsed.getTime())) {
+                lastFollowUpDateObj = new Date(parsed);
                 computedLastFollowUpFormatted = formatDateForDisplay(parsed);
             }
         }
@@ -4759,7 +4761,10 @@ function buildFollowUpPatientCard(patient, options = {}) {
             const latest = getLatestFollowUpForPatient(patient.ID);
             if (latest && (latest.FollowUpDate || latest.followUpDate || latest.SubmissionDate || latest.submissionDate)) {
                 const parsed = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(latest.FollowUpDate || latest.followUpDate || latest.SubmissionDate || latest.submissionDate) : new Date(latest.FollowUpDate || latest.followUpDate || latest.SubmissionDate || latest.submissionDate);
-                if (parsed && !isNaN(parsed.getTime())) computedLastFollowUpFormatted = formatDateForDisplay(parsed);
+                if (parsed && !isNaN(parsed.getTime())) {
+                    lastFollowUpDateObj = new Date(parsed);
+                    computedLastFollowUpFormatted = formatDateForDisplay(parsed);
+                }
             }
         }
     } catch (e) {
@@ -4805,8 +4810,35 @@ function buildFollowUpPatientCard(patient, options = {}) {
         EpicareI18n.translate('month.november'),
         EpicareI18n.translate('month.december')
     ];
-    const currentMonth = monthNames[new Date().getMonth()];
-    const currentYear = new Date().getFullYear();
+    const today = new Date();
+    const currentMonth = monthNames[today.getMonth()];
+    const currentYear = today.getFullYear();
+
+    let completionMonth = currentMonth;
+    let completionYear = currentYear;
+
+    const fallbackMonthFromStatus = () => {
+        if (!patient || !patient.FollowUpStatus) return null;
+        const match = String(patient.FollowUpStatus).match(/completed\s+for\s+([a-z]+)\s+(\d{4})/i);
+        if (!match) return null;
+        const englishMonths = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+        const idx = englishMonths.indexOf(match[1].toLowerCase());
+        const year = parseInt(match[2], 10);
+        if (idx === -1 || Number.isNaN(year)) return null;
+        return { idx, year };
+    };
+
+    if (lastFollowUpDateObj) {
+        const idx = lastFollowUpDateObj.getMonth();
+        completionMonth = monthNames[idx];
+        completionYear = lastFollowUpDateObj.getFullYear();
+    } else {
+        const parsedStatus = fallbackMonthFromStatus();
+        if (parsedStatus) {
+            completionMonth = monthNames[parsedStatus.idx] || monthNames[0];
+            completionYear = parsedStatus.year;
+        }
+    }
 
     // Header button/badge based on state
     let headerActionHtml = '';
@@ -4836,7 +4868,7 @@ function buildFollowUpPatientCard(patient, options = {}) {
         <div style="background: #d4edda; border-radius: 8px; padding: 12px; margin-top: 16px;">
             <div style="display: flex; align-items: center; gap: 8px; color: #155724;">
                 <i class="fas fa-check-circle"></i>
-                <span style="font-weight: 600;">${EpicareI18n.translate('followup.completedForMonth', { month: currentMonth, year: currentYear })}</span>
+                <span style="font-weight: 600;">${EpicareI18n.translate('followup.completedForMonth', { month: completionMonth, year: completionYear })}</span>
             </div>
             ${nextFollowUpDate ? `
             <div style="margin-top: 6px; color: #155724; font-size: 0.9em;">
@@ -4967,6 +4999,39 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
         return false;
     }
 
+    // Helper: resolve last follow-up date from various backend fields
+    function resolveLastFollowUpDateLocal(patient) {
+        if (!patient) return null;
+        const candidates = [
+            patient.LastFollowUp,
+            patient.LastFollowUpDate,
+            patient.lastFollowUp,
+            patient.lastFollowUpDate,
+            patient.FollowUpDate,
+            patient.followUpDate,
+            patient.currentFollowUpData && (patient.currentFollowUpData.FollowUpDate || patient.currentFollowUpData.followUpDate)
+        ];
+
+        for (const candidate of candidates) {
+            if (!candidate) continue;
+            let parsed = null;
+            try {
+                if (typeof parseFlexibleDate === 'function') {
+                    parsed = parseFlexibleDate(candidate);
+                } else {
+                    parsed = new Date(candidate);
+                }
+            } catch (e) {
+                parsed = null;
+            }
+            if (parsed && !isNaN(parsed.getTime())) {
+                parsed.setHours(0, 0, 0, 0);
+                return parsed;
+            }
+        }
+        return null;
+    }
+
     // Helper: check if follow-up is due or overdue (within 5 days before or after due date)
     function checkIfFollowUpNeedsReset(patient) {
         // Prefer shared implementation from utils.js if available
@@ -4985,22 +5050,17 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
             window.Logger && window.Logger.warn('checkIfFollowUpNeedsReset wrapper failed to call global impl', e);
         }
 
-        // Fallback: original logic
         const nextFollowUpDate = (typeof calculateNextFollowUpDate === 'function') ? calculateNextFollowUpDate(patient) : null;
         if (!nextFollowUpDate) return false;
+
+        const notificationStartDate = new Date(nextFollowUpDate);
+        notificationStartDate.setDate(notificationStartDate.getDate() - 5);
+        notificationStartDate.setHours(0, 0, 0, 0);
 
         const today = new Date();
         today.setHours(0, 0, 0, 0); // Normalize to start of day
 
-        const dueDate = new Date(nextFollowUpDate);
-        dueDate.setHours(0, 0, 0, 0);
-
-        // Calculate 5 days before due date
-        const fiveDaysBefore = new Date(dueDate);
-        fiveDaysBefore.setDate(fiveDaysBefore.getDate() - 5);
-
-        // Follow-up is "due" if today is within 5 days before due date or after due date
-        return today >= fiveDaysBefore;
+        return today >= notificationStartDate;
     }
 
     // Helper: get completion month from follow-up status
@@ -5029,23 +5089,27 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
             window.Logger && window.Logger.warn('calculateNextFollowUpDate wrapper failed to call global impl', e);
         }
 
-        // Fallback to previous implementation if global isn’t present
-        if (!patient || !patient.LastFollowUp) return null;
-        const lastDate = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(patient.LastFollowUp) : new Date(patient.LastFollowUp);
-        if (!lastDate || isNaN(lastDate.getTime())) return null;
+        const lastDate = resolveLastFollowUpDateLocal(patient);
+        if (!lastDate) return null;
+
         const nextDate = new Date(lastDate);
-        const frequency = patient.FollowFrequency || 'Monthly';
-        let daysToAdd = 30;
-        switch ((frequency || '').toString().trim().toLowerCase()) {
-            case 'monthly': daysToAdd = 30; break;
-            case 'quarterly': daysToAdd = 90; break;
+        const frequency = (patient && (patient.FollowFrequency || patient.followFrequency) ? patient.FollowFrequency || patient.followFrequency : 'Monthly').toString().trim().toLowerCase();
+        switch (frequency) {
+            case 'quarterly':
+                nextDate.setMonth(nextDate.getMonth() + 3);
+                break;
             case 'bi yearly':
             case 'bi-yearly':
-            case 'biannual': daysToAdd = 180; break;
-            default: daysToAdd = 30; break;
+            case 'biannual':
+                nextDate.setMonth(nextDate.getMonth() + 6);
+                break;
+            case 'monthly':
+            default:
+                nextDate.setMonth(nextDate.getMonth() + 1);
+                break;
         }
-        nextDate.setDate(nextDate.getDate() + daysToAdd);
-        try { window.Logger && window.Logger.debug && window.Logger.debug(`Next follow-up date for patient ${patient.ID}: ${nextDate.toISOString().split('T')[0]} (${frequency} - ${daysToAdd} days)`); } catch (e) { /* ignore */ }
+        nextDate.setHours(0, 0, 0, 0);
+        try { window.Logger && window.Logger.debug && window.Logger.debug(`Next follow-up date for patient ${patient && patient.ID ? patient.ID : 'unknown'}: ${nextDate.toISOString().split('T')[0]} (${frequency})`); } catch (e) { /* ignore */ }
         return nextDate;
     }
 

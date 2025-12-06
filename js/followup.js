@@ -275,6 +275,15 @@ function checkIfFollowUpNeedsResetSafe(patient) {
     return today >= notificationStartDate;
 }
 
+function checkIfDueForCurrentMonth(patient) {
+    if (!patient) return false;
+    const next = patient.NextFollowUpDate || patient.nextFollowUpDate;
+    const parsed = toNormalizedDate(next);
+    if (!parsed) return false;
+    const today = new Date();
+    return parsed.getMonth() === today.getMonth() && parsed.getFullYear() === today.getFullYear();
+}
+
 function deriveRenalFlagFromNotes(extraSources = []) {
     const normalized = [];
     const push = (val) => {
@@ -4843,7 +4852,12 @@ function buildFollowUpPatientCard(patient, options = {}) {
         buttonText = 'Start Follow-up',
         buttonClass = 'start-btn',
         buttonAction = 'openFollowUpModal',
-        isReferredToMO = false
+        isReferredToMO = false,
+        buttonDisabled = false,
+        isReturnedFromReferral = false,
+        isDueForCurrentMonth = false,
+        medicationsFromMO = null,
+        referralDate = null
     } = options;
 
     const card = document.createElement('div');
@@ -4900,7 +4914,14 @@ function buildFollowUpPatientCard(patient, options = {}) {
         ? `<a href="tel:${patientPhone}" style="color: #007bff; text-decoration: none;">${patientPhone}</a>`
         : EpicareI18n.translate('label.notAvailable');
 
-    const completionDateLabel = lastFollowUpDateObj ? formatDateForDisplay(lastFollowUpDateObj) : EpicareI18n.translate('label.notAvailable');
+    const monthLabelKeys = [
+        'month.january', 'month.february', 'month.march', 'month.april', 'month.may', 'month.june',
+        'month.july', 'month.august', 'month.september', 'month.october', 'month.november', 'month.december'
+    ];
+    const completionMonthName = lastFollowUpDateObj
+        ? EpicareI18n.translate(monthLabelKeys[lastFollowUpDateObj.getMonth()] || 'month.january')
+        : '';
+    const completionYearNumber = lastFollowUpDateObj ? lastFollowUpDateObj.getFullYear() : '';
 
     const resolvedNextFollowUpDate = nextFollowUpDate instanceof Date ? nextFollowUpDate : getEffectiveNextFollowUpDate(patient);
 
@@ -4914,7 +4935,8 @@ function buildFollowUpPatientCard(patient, options = {}) {
         headerActionHtml = `<button class="btn btn-primary action-btn ${buttonClass}" 
             data-action="${buttonAction}" 
             data-patient-id="${normalizePatientId(patient.ID)}"
-            style="background: #007bff; color: white; border: none; padding: 8px 20px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 500;">
+            ${buttonDisabled ? 'disabled' : ''}
+            style="background: #007bff; color: white; border: none; padding: 8px 20px; border-radius: 6px; cursor: ${buttonDisabled ? 'not-allowed' : 'pointer'}; opacity: ${buttonDisabled ? '0.6' : '1'}; display: inline-flex; align-items: center; gap: 6px; font-weight: 500;">
             <i class="fas fa-play"></i> ${EpicareI18n.translate('button.start')}
         </button>`;
     } else {
@@ -4922,17 +4944,22 @@ function buildFollowUpPatientCard(patient, options = {}) {
         headerActionHtml = `<button class="btn btn-primary action-btn ${buttonClass}" 
             data-action="${buttonAction}" 
             data-patient-id="${normalizePatientId(patient.ID)}"
-            style="background: #007bff; color: white; border: none; padding: 8px 20px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 500;">
+            ${buttonDisabled ? 'disabled' : ''}
+            style="background: #007bff; color: white; border: none; padding: 8px 20px; border-radius: 6px; cursor: ${buttonDisabled ? 'not-allowed' : 'pointer'}; opacity: ${buttonDisabled ? '0.6' : '1'}; display: inline-flex; align-items: center; gap: 6px; font-weight: 500;">
             <i class="fas fa-play"></i> ${EpicareI18n.translate('button.startFollowup')}
         </button>`;
     }
 
     // Styled info panel for completed state (green background)
+    const completionBannerText = completionMonthName
+        ? EpicareI18n.translate('followup.completedForMonth', { month: completionMonthName, year: completionYearNumber || '' })
+        : EpicareI18n.translate('followup.completedForMonth', { month: formatDateForDisplay(lastFollowUpDateObj), year: '' });
+
     const completedInfoPanelHtml = isCompleted ? `
         <div style="background: #d4edda; border-radius: 8px; padding: 12px; margin-top: 16px;">
             <div style="display: flex; align-items: center; gap: 8px; color: #155724;">
                 <i class="fas fa-check-circle"></i>
-                <span style="font-weight: 600;">${EpicareI18n.translate('followup.completedForMonth', { month: completionDateLabel, year: '' }).trim()}</span>
+                <span style="font-weight: 600;">${completionBannerText}</span>
             </div>
             ${resolvedNextFollowUpDate ? `
             <div style="margin-top: 6px; color: #155724; font-size: 0.9em;">
@@ -4946,6 +4973,36 @@ function buildFollowUpPatientCard(patient, options = {}) {
             <div style="display: flex; align-items: center; gap: 8px; color: #856404;">
                 <i class="fas fa-exclamation-triangle"></i>
                 <span style="font-weight: 600;">${EpicareI18n.translate('followup.dueForNewMonth')}</span>
+            </div>
+        </div>` : '';
+
+    const referralNoticeHtml = isReferredToMO ? `
+        <div style="background: #fff3cd; border-radius: 8px; padding: 12px; margin-top: 12px; border-left: 4px solid var(--warning-color);">
+            <div style="display: flex; align-items: center; gap: 8px; color: #856404; font-weight: 600;">
+                <i class="fas fa-user-md"></i>
+                <span>Patient referred to Medical Officer</span>
+            </div>
+            <div style="margin-top: 4px; font-size: 0.9em; color: #6c4a00;">
+                Referral date: ${referralDate ? formatDateForDisplay(referralDate) : EpicareI18n.translate('label.notAvailable')}
+            </div>
+        </div>` : '';
+
+    const returnedReferralNoticeHtml = (isReturnedFromReferral && isDueForCurrentMonth) ? `
+        <div style="background: #e8f4fd; border-radius: 8px; padding: 12px; margin-top: 12px; border-left: 4px solid var(--primary-color);">
+            <div style="display: flex; align-items: center; gap: 8px; color: var(--primary-color); font-weight: 600;">
+                <i class="fas fa-user-md"></i>
+                <span>Returned from Medical Officer – Due this month</span>
+            </div>
+        </div>` : '';
+
+    const medicationInfoHtml = (Array.isArray(medicationsFromMO) && medicationsFromMO.length > 0 && isReturnedFromReferral) ? `
+        <div style="background: #e3f2fd; border-radius: 8px; padding: 12px; margin-top: 12px; border-left: 4px solid var(--primary-color);">
+            <div style="display: flex; align-items: center; gap: 8px; color: var(--primary-color); font-weight: 600;">
+                <i class="fas fa-pills"></i>
+                <span>Updated medications from Medical Officer</span>
+            </div>
+            <div style="margin-top: 6px; font-size: 0.9em; color: #555;">
+                ${medicationsFromMO.map(med => escapeHtml(`${med.name || med.medication || ''} ${med.dosage || ''}`.trim())).filter(Boolean).join(', ') || EpicareI18n.translate('label.notAvailable')}
             </div>
         </div>` : '';
 
@@ -4984,6 +5041,9 @@ function buildFollowUpPatientCard(patient, options = {}) {
             
             ${completedInfoPanelHtml}
             ${dueInfoPanelHtml}
+            ${returnedReferralNoticeHtml}
+            ${referralNoticeHtml}
+            ${medicationInfoHtml}
             ${videoButtonHtml}
         </div>
     `;
@@ -5064,6 +5124,13 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
 
             const status = (patient.FollowUpStatus || patient.followUpStatus || '').toString().trim().toLowerCase();
             const looksCompleted = status.includes('completed') || /completed for/i.test(patient.FollowUpStatus || '');
+
+            // If the follow-up needs to be reset for the new month, treat it as pending even if
+            // the status text still says "Completed" from the previous cycle.
+            const needsReset = checkIfFollowUpNeedsResetSafe(patient);
+            if (needsReset) {
+                return false;
+            }
 
             const nextDate = getEffectiveNextFollowUpDate(patient);
             const today = new Date();
@@ -5180,20 +5247,34 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
         const nextFollowUpDate = getEffectiveNextFollowUpDate(patient);
         const isDue = checkIfFollowUpNeedsResetSafe(patient);
         const patientPhone = patient.Phone || patient.PhoneNumber || 'N/A';
+        const statusText = (patient.FollowUpStatus || patient.followUpStatus || '').toString().trim().toLowerCase();
+        const isPending = statusText === 'pending';
+        const canStartFollowUp = !isCompleted || isDue || isPending;
+        const isReturnedFromReferral = isPending && (patient.LastFollowUp || patient.LastFollowUpDate) && (patient.NextFollowUpDate || patient.nextFollowUpDate);
+        const isDueForCurrentMonth = isReturnedFromReferral ? checkIfDueForCurrentMonth(patient) : false;
+        const latestFollowUpRecord = (typeof getLatestFollowUpForPatient === 'function') ? getLatestFollowUpForPatient(patient.ID) : null;
+        const isReferredToMOCard = latestFollowUpRecord ? (isAffirmative(latestFollowUpRecord.ReferredToMO) && !isAffirmative(latestFollowUpRecord.ReferralClosed)) : false;
+        const referralDate = latestFollowUpRecord ? (latestFollowUpRecord.ReferralDate || latestFollowUpRecord.FollowUpDate || latestFollowUpRecord.SubmissionDate) : null;
+        const medicationsFromMO = (isReturnedFromReferral && Array.isArray(patient.Medications) && patient.Medications.length > 0) ? patient.Medications : null;
         
         // Determine button text and action based on role and patient status
-        let buttonText = 'Start Follow-up';
+        let buttonText = window.EpicareI18n ? window.EpicareI18n.translate('button.startFollowup') : 'Start Follow-up';
         let buttonClass = 'start-btn';
         let buttonAction = 'openFollowUpModal';
+        let buttonDisabled = false;
         
         if (currentUserRole === 'phc_admin' && 
             (patient.PatientStatus || '').toLowerCase() === 'referred to mo') {
             buttonText = 'Review Referral';
             buttonAction = 'openFollowUpModal';
         }
-        
-        const isReferredToMO = (currentUserRole === 'phc_admin' && (patient.PatientStatus || '').toLowerCase() === 'referred to mo');
 
+        if (!canStartFollowUp) {
+            buttonText = window.EpicareI18n ? window.EpicareI18n.translate('label.completed') : 'Completed';
+            buttonClass = 'completed-btn';
+            buttonDisabled = true;
+        }
+        
         const card = buildFollowUpPatientCard(patient, {
             isCompleted,
             nextFollowUpDate,
@@ -5202,7 +5283,12 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
             buttonText,
             buttonClass,
             buttonAction,
-            isReferredToMO
+            buttonDisabled,
+            isReferredToMO: isReferredToMOCard,
+            referralDate,
+            isReturnedFromReferral,
+            isDueForCurrentMonth,
+            medicationsFromMO
         });
 
         cardGrid.appendChild(card);

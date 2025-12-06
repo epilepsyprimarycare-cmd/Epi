@@ -3137,7 +3137,7 @@ window.followUpStartTime = null;
 // Side Effect Data based on Clinical Presentations
 const sideEffectData = {
     "Phenobarbitone": ["Cognitive issues (e.g., drowsiness, confusion)", "Teratogenicity risk"],
-    "Phenytoin": ["Gingival hyperplasia (gum swelling)", "Hirsutism (excess hair growth)", "Fetal hydantoin syndrome risk"],
+    "Phenytoin": ["Gingival hyperplasia (gum swelling)", "Hirsutism (excess hair growth)"],
     "Carbamazepine": ["Skin rash", "Facial dysmorphism in babies (risk)"],
     "Sodium Valproate": ["Neural tube defects risk", "Weight gain", "Hair loss", "PCOS risk"],
     "Levetiracetam": ["Mood changes (irritability, depression)", "PCOS risk", "Oligomenorrhea (infrequent periods)"],
@@ -5638,8 +5638,29 @@ function generateSideEffectChecklist(patient, checklistContainerId, otherContain
             meds = [];
         }
 
-        // Ensure all entries are strings
-        meds = meds.map(m => (typeof m === 'string' ? m : (m && m.name ? m.name : String(m)))).filter(Boolean);
+        const extractMedicationName = (entry) => {
+            if (entry === null || entry === undefined) return '';
+            if (typeof entry === 'string') return entry;
+            if (typeof entry === 'number' || typeof entry === 'boolean') return String(entry);
+            if (typeof entry === 'object') {
+                const candidates = ['name', 'medication', 'medicine', 'drug', 'drugName', 'label', 'value'];
+                for (const key of candidates) {
+                    if (entry[key]) return String(entry[key]);
+                }
+            }
+            return '';
+        };
+
+        // Flatten nested arrays and ensure all entries are strings
+        const normalizedMeds = [];
+        meds.forEach(item => {
+            if (Array.isArray(item)) {
+                item.forEach(sub => normalizedMeds.push(sub));
+            } else {
+                normalizedMeds.push(item);
+            }
+        });
+        meds = normalizedMeds.map(extractMedicationName).filter(name => name && name.trim().length > 0);
 
         // Clear existing contents
         container.innerHTML = '';

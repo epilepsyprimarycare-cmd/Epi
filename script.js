@@ -10,7 +10,6 @@ if (typeof window.formatDateInDDMMYYYY !== 'function') {
         return `${dd}-${mm}-${yyyy}`;
     };
 }
-const formatDateInDDMMYYYY = window.formatDateInDDMMYYYY;
 
 // --- CRITICAL FIX: Define showPatientDetails immediately at the top ---
 // This ensures the function is available even if the script crashes later.

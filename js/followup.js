@@ -3138,7 +3138,7 @@ window.followUpStartTime = null;
 const sideEffectData = {
     "Phenobarbitone": ["Cognitive issues (e.g., drowsiness, confusion)", "Teratogenicity risk"],
     "Phenytoin": ["Gingival hyperplasia (gum swelling)", "Hirsutism (excess hair growth)"],
-    "Carbamazepine": ["Skin rash", "Facial dysmorphism in babies (risk)"],
+    "Carbamazepine": ["Skin rash", "Diplopia (double vision)", "Ataxia (Walk as if drunk)"],
     "Sodium Valproate": ["Neural tube defects risk", "Weight gain", "Hair loss", "PCOS risk"],
     "Levetiracetam": ["Mood changes (irritability, depression)", "PCOS risk", "Oligomenorrhea (infrequent periods)"],
     "Benzodiazepines": ["Drowsiness", "Changes in cognition"]

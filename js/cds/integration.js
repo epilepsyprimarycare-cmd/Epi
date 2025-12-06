@@ -91,15 +91,6 @@ function parseMedicationStringHelper(medString) {
   return results;
 }
 
-// Expose helpers for Node-based tests
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {
-    parseMedicationStringHelper,
-    CDSIntegration,
-    parseMedicationString: function(medString) { return parseMedicationStringHelper(medString); }
-  };
-}
-
 class CDSIntegration {
   constructor() {
     this.config = null;
@@ -568,6 +559,9 @@ class CDSIntegration {
         metadata: result.metadata || {},
         standardResponse: result
       };
+
+      this.applyDoseAdjustmentSafetyGates(analysis, patientContext);
+      this.applySideEffectDrivenDecisions(analysis, patientContext);
       
       // Store for telemetry AFTER analysis is created
       this.lastAnalyzedPatient = patientContext;
@@ -945,6 +939,27 @@ class CDSIntegration {
   followUp.seizuresSinceLastVisit = (currentSeizures !== undefined && currentSeizures !== null) 
     ? Number(currentSeizures) 
     : Number(pickFirst('seizuresSinceLastVisit', 'followup-seizure-count', 'SeizuresSinceLastVisit')) || 0;
+
+    const injuryNotesRaw = src.currentFollowUpData?.injuryNotes ||
+      pickFirst('SeizureSeverityChange', 'injuryNotes', 'injuryDescription');
+    if (injuryNotesRaw !== undefined && injuryNotesRaw !== null) {
+      followUp.seizureInjuryNotes = injuryNotesRaw;
+    }
+
+    const injurySelectionRaw = src.currentFollowUpData?.injuriesData ||
+      pickFirst('injuriesData', 'InjuryType', 'injurySelection', 'injuryData');
+    const parsedInjurySelection = this.parseInjurySelection(injurySelectionRaw) || null;
+    if (Array.isArray(parsedInjurySelection) && parsedInjurySelection.length > 0) {
+      followUp.injuryList = parsedInjurySelection;
+    }
+    if (
+      (typeof injuryNotesRaw === 'string' && injuryNotesRaw.trim().length > 0) ||
+      (Array.isArray(parsedInjurySelection) && parsedInjurySelection.length > 0) ||
+      (typeof injurySelectionRaw === 'string' && injurySelectionRaw.trim().length > 0 && !parsedInjurySelection)
+    ) {
+      followUp.hasSeizureInjury = true;
+    }
+
     followUp.medicationChanged = parseBool(pickFirst('MedicationChanged', 'medicationChanged')) || false;
     // NewMedications can be a string or array/object
     let newMedsRaw = pickFirst('NewMedications', 'newMedications', 'NewMedications') || pickFirst('NewMedications', 'NewMedication') || src.NewMedications || src.newMedications || null;
@@ -2523,6 +2538,287 @@ class CDSIntegration {
     window.Logger.debug('CDS Integration: Enhanced CDS output rendered');
   }
 
+  applyDoseAdjustmentSafetyGates(analysis, patientContext) {
+    if (!analysis || !patientContext) return;
+    const gating = this.computeDoseGatingContext(patientContext);
+    if (!gating.shouldGateForAdherence && !gating.shouldGateForEarlyTherapy) return;
+
+    const subtherapeuticCodes = ['below_mg_per_kg', 'below_target', 'below_min_dose', 'subtherapeutic', 'inadequate_dose', 'dose_low', 'below_optimal'];
+    let adherenceGateApplied = false;
+    let waitGateApplied = false;
+
+    if (Array.isArray(analysis.doseFindings)) {
+      analysis.doseFindings = analysis.doseFindings.map(finding => {
+        if (!finding || !Array.isArray(finding.findings)) return finding;
+        const isSubtherapeutic = finding.findings.some(code => subtherapeuticCodes.includes(String(code)));
+        if (!isSubtherapeutic) return finding;
+        const updated = { ...finding };
+        if (gating.shouldGateForAdherence) {
+          updated.adherenceGated = true;
+          updated.recommendation = 'Dosage is suboptimal but adherence is poor; provide adherence counselling before uptitration.';
+          updated.message = updated.message || updated.recommendation;
+          adherenceGateApplied = true;
+        } else if (gating.shouldGateForEarlyTherapy) {
+          updated.waitPeriodGated = true;
+          updated.recommendation = 'Dose adjustment deferred until the regimen has been continued for at least 2 months without injury.';
+          updated.message = updated.message || updated.recommendation;
+          waitGateApplied = true;
+        }
+        return updated;
+      });
+    }
+
+    if (adherenceGateApplied) {
+      const note = 'Dosage is suboptimal but adherence is poor (<2 seizures since last visit). Address adherence barriers before considering uptitration.';
+      this.addSpecialConsideration(analysis, {
+        name: 'Address adherence before uptitration',
+        type: 'adherence',
+        severity: 'medium',
+        text: note
+      });
+    }
+
+    if (waitGateApplied) {
+      const note = 'Dose increases are deferred because the regimen is less than 60 days old without reported injuries; observe until the trial period completes.';
+      this.addSpecialConsideration(analysis, {
+        name: 'Respect titration wait period',
+        type: 'optimization',
+        severity: 'info',
+        text: note
+      });
+    }
+  }
+
+  addSpecialConsideration(analysis, consideration) {
+    if (!analysis || !consideration) return;
+    analysis.specialConsiderations = analysis.specialConsiderations || [];
+    if (!analysis.specialConsiderations.some(sc => sc.text === consideration.text)) {
+      analysis.specialConsiderations.push({ ...consideration });
+    }
+
+    if (analysis.treatmentRecommendations) {
+      analysis.treatmentRecommendations.specialConsiderations = analysis.treatmentRecommendations.specialConsiderations || [];
+      if (!analysis.treatmentRecommendations.specialConsiderations.some(sc => sc.text === consideration.text)) {
+        analysis.treatmentRecommendations.specialConsiderations.push({ ...consideration });
+      }
+    }
+  }
+
+  applySideEffectDrivenDecisions(analysis, patientContext) {
+    const followUp = patientContext?.followUp || {};
+    const adverseEffects = this.normalizeAdverseEffectsList(
+      followUp.adverseEffects ||
+      patientContext?.clinicalFlags?.adverseEffects ||
+      patientContext?.adverseEffects
+    );
+    if (adverseEffects.length === 0) return;
+
+    const meds = (patientContext.regimen?.medications || []).map(m => (m?.name || m?.medication || m?.drug || '').toString().toLowerCase()).filter(Boolean);
+    const hasMedication = (needle) => meds.some(name => name.includes(needle));
+    const hasEffectKeyword = (keywords) => adverseEffects.some(effect => keywords.some(keyword => effect.includes(keyword)));
+
+    const severeScenarios = [
+      {
+        id: 'carbamazepine_severe_rash',
+        drugNeedle: 'carbamazepine',
+        keywords: ['rash', 'skin rash', 'blister', 'stevens'],
+        message: 'Severe skin rash reported on carbamazepine – stop the drug and switch immediately.',
+        rationale: 'Skin rash on carbamazepine may evolve into Stevens-Johnson syndrome.',
+        nextSteps: ['Stop carbamazepine immediately', 'Provide urgent dermatology review', 'Start alternative ASM per protocol']
+      },
+      {
+        id: 'phenytoin_gingival_hyperplasia',
+        drugNeedle: 'phenytoin',
+        keywords: ['gingival', 'gum hyperplasia', 'gum swelling'],
+        message: 'Gingival hyperplasia reported on phenytoin – plan to change therapy and address dental complications.',
+        rationale: 'Persistent gum hypertrophy from phenytoin requires switching to an alternative ASM.',
+        nextSteps: ['Arrange dental evaluation', 'Switch from phenytoin to a safer alternative', 'Educate on oral hygiene']
+      }
+    ];
+
+    severeScenarios.forEach(severe => {
+      if (!hasMedication(severe.drugNeedle)) return;
+      if (!hasEffectKeyword(severe.keywords)) return;
+      const warning = {
+        id: severe.id,
+        severity: 'high',
+        text: severe.message,
+        rationale: severe.rationale,
+        nextSteps: severe.nextSteps,
+        ruleId: severe.id,
+        category: 'safety'
+      };
+      analysis.warnings.push(warning);
+      this.addSpecialConsideration(analysis, {
+        name: severe.message,
+        type: 'safety',
+        severity: 'high',
+        text: severe.message
+      });
+      analysis.treatmentRecommendations = analysis.treatmentRecommendations || {};
+      analysis.treatmentRecommendations.regimenChanges = analysis.treatmentRecommendations.regimenChanges || [];
+      analysis.treatmentRecommendations.regimenChanges.push({
+        type: 'drug_change',
+        drug: severe.drugNeedle,
+        recommendation: severe.message,
+        reason: severe.rationale
+      });
+    });
+
+    const toxicityScenarios = [
+      {
+        id: 'carbamazepine_toxicity_neurologic',
+        drugNeedle: 'carbamazepine',
+        keywords: ['ataxia', 'diplopia', 'double vision', 'unsteady'],
+        message: 'Neurologic toxicity (ataxia/diplopia) noted on carbamazepine – hold uptitration and review levels.',
+        rationale: 'Symptoms suggest dose-related toxicity; increasing dose can worsen adverse effects.',
+        nextSteps: ['Check carbamazepine levels', 'Reduce dose or switch therapy', 'Assess for falls risk']
+      }
+    ];
+
+    toxicityScenarios.forEach(tox => {
+      if (!hasMedication(tox.drugNeedle)) return;
+      if (!hasEffectKeyword(tox.keywords)) return;
+      let touchedDoseFinding = false;
+      if (Array.isArray(analysis.doseFindings)) {
+        analysis.doseFindings = analysis.doseFindings.map(f => {
+          const drugLabel = (f?.drug || f?.medication || '').toString().toLowerCase();
+          if (drugLabel.includes(tox.drugNeedle) || meds.length === 1) {
+            touchedDoseFinding = true;
+            return {
+              ...f,
+              toxicityFlag: true,
+              recommendation: 'Dose-linked adverse effects present; do not uptitrate until toxicity resolves.',
+              message: f.message || 'Dose-linked adverse effects present; do not uptitrate until toxicity resolves.'
+            };
+          }
+          return f;
+        });
+      }
+      this.addSpecialConsideration(analysis, {
+        name: 'Hold uptitration due to toxicity',
+        type: 'safety',
+        severity: 'medium',
+        text: tox.message
+      });
+      if (!touchedDoseFinding) {
+        analysis.warnings.push({
+          id: tox.id,
+          severity: 'medium',
+          text: tox.message,
+          rationale: tox.rationale,
+          nextSteps: tox.nextSteps,
+          category: 'safety'
+        });
+      }
+    });
+  }
+
+  normalizeAdverseEffectsList(rawValue) {
+    if (!rawValue && rawValue !== 0) return [];
+    let list = [];
+    if (Array.isArray(rawValue)) {
+      list = rawValue;
+    } else if (typeof rawValue === 'string') {
+      const trimmed = rawValue.trim();
+      if (trimmed.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) list = parsed;
+        } catch (e) {
+          list = trimmed.split(/[,;|\n]+/);
+        }
+      } else {
+        list = trimmed.split(/[,;|\n]+/);
+      }
+    } else if (typeof rawValue === 'object') {
+      list = Object.values(rawValue).filter(Boolean);
+    }
+    return list
+      .map(entry => (entry === undefined || entry === null ? '' : entry).toString().toLowerCase().trim())
+      .filter(Boolean);
+  }
+
+  computeDoseGatingContext(patientContext) {
+    const followUp = patientContext?.followUp || {};
+    const step3 = followUp.step3 || {};
+    const adherenceRaw = (step3.adherence || followUp.adherence || patientContext.clinicalFlags?.adherencePattern || '').toString().toUpperCase();
+    const poorAdherence = ['OCCASIONAL', 'FREQUENT', 'STOPPED'].includes(adherenceRaw);
+
+    const seizureCandidates = [
+      followUp.seizuresSinceLastVisit,
+      patientContext.seizuresSinceLastVisit,
+      step3.seizureCount
+    ];
+    let numericSeizureCount = 0;
+    for (const candidate of seizureCandidates) {
+      const val = Number(candidate);
+      if (!Number.isNaN(val)) {
+        numericSeizureCount = val;
+        break;
+      }
+    }
+
+    const lowSeizureBurden = numericSeizureCount < 2;
+    const injuryReported = this.hasReportedSeizureInjury(followUp);
+    const daysSinceLast = typeof followUp.daysSinceLastVisit === 'number'
+      ? followUp.daysSinceLastVisit
+      : (typeof step3.daysSinceLast === 'number' ? step3.daysSinceLast : null);
+    const shouldGateForEarlyTherapy = !injuryReported && typeof daysSinceLast === 'number' && daysSinceLast >= 0 && daysSinceLast < 60 && numericSeizureCount > 0;
+
+    return {
+      adherenceRaw,
+      numericSeizureCount,
+      lowSeizureBurden,
+      hasInjury: injuryReported,
+      daysSinceLast,
+      shouldGateForAdherence: poorAdherence && lowSeizureBurden,
+      shouldGateForEarlyTherapy
+    };
+  }
+
+  hasReportedSeizureInjury(followUp = {}) {
+    if (!followUp) return false;
+    if (followUp.hasSeizureInjury !== undefined) return !!followUp.hasSeizureInjury;
+    if (typeof followUp.seizureInjuryNotes === 'string' && followUp.seizureInjuryNotes.trim().length > 0) return true;
+    if (Array.isArray(followUp.injuryList) && followUp.injuryList.length > 0) return true;
+    if (typeof followUp.injuryList === 'string' && followUp.injuryList.trim().length > 0) return true;
+    return false;
+  }
+
+  parseInjurySelection(rawValue) {
+    if (!rawValue && rawValue !== 0) return null;
+    if (Array.isArray(rawValue)) {
+      return rawValue.filter(Boolean);
+    }
+    if (typeof rawValue === 'string') {
+      const trimmed = rawValue.trim();
+      if (!trimmed) return null;
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(Boolean);
+        }
+        if (parsed && Array.isArray(parsed.parts)) {
+          return parsed.parts.filter(Boolean);
+        }
+      } catch (e) {
+        // Not JSON, fall through to delimiter split
+      }
+      return trimmed.split(/[,;|\n]+/).map(part => part.trim()).filter(Boolean);
+    }
+    if (typeof rawValue === 'object') {
+      if (Array.isArray(rawValue.parts)) {
+        return rawValue.parts.filter(Boolean);
+      }
+      if (Array.isArray(rawValue.list)) {
+        return rawValue.list.filter(Boolean);
+      }
+      return Object.values(rawValue).filter(Boolean);
+    }
+    return null;
+  }
+
   /**
    * Analyze medication doses against formulary and generate dose findings
    * @param {Array} medications - Array of medication objects
@@ -2838,3 +3134,12 @@ window.CDSIntegration = CDSIntegration;
 
 // Initialize global CDS integration instance
 window.cdsIntegration = new CDSIntegration();
+
+// Expose helpers for Node-based tests (after class definition)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    parseMedicationStringHelper,
+    CDSIntegration,
+    parseMedicationString: function(medString) { return parseMedicationStringHelper(medString); }
+  };
+}

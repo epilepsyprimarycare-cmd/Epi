@@ -151,6 +151,130 @@ function collectRecentFollowUpSummaries(patientId, limit = 3) {
         .slice(0, limit);
 }
 
+function toNormalizedDate(value) {
+    if (!value) return null;
+    try {
+        const parsed = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(value) : new Date(value);
+        if (!parsed || isNaN(parsed.getTime())) return null;
+        parsed.setHours(0, 0, 0, 0);
+        return parsed;
+    } catch (e) {
+        return null;
+    }
+}
+
+function getResolvedLastFollowUpDateSafe(patient) {
+    if (!patient) return null;
+    try {
+        if (window.EpiUtils && typeof window.EpiUtils.getResolvedLastFollowUpDate === 'function') {
+            const resolved = window.EpiUtils.getResolvedLastFollowUpDate(patient);
+            const normalized = resolved instanceof Date ? resolved : toNormalizedDate(resolved);
+            if (normalized) return normalized;
+        }
+        if (typeof window.getResolvedLastFollowUpDate === 'function') {
+            const resolved = window.getResolvedLastFollowUpDate(patient);
+            const normalized = resolved instanceof Date ? resolved : toNormalizedDate(resolved);
+            if (normalized) return normalized;
+        }
+    } catch (e) {
+        window.Logger && window.Logger.warn && window.Logger.warn('getResolvedLastFollowUpDateSafe failed to use shared helper', e);
+    }
+
+    const candidates = [
+        patient.LastFollowUp,
+        patient.LastFollowUpDate,
+        patient.lastFollowUp,
+        patient.lastFollowUpDate,
+        patient.FollowUpDate,
+        patient.followUpDate,
+        patient.currentFollowUpData && (patient.currentFollowUpData.FollowUpDate || patient.currentFollowUpData.followUpDate)
+    ];
+    for (const value of candidates) {
+        const normalized = toNormalizedDate(value);
+        if (normalized) return normalized;
+    }
+    return null;
+}
+
+function getServerProvidedNextFollowUpDate(patient) {
+    if (!patient) return null;
+    const candidates = [
+        patient.NextFollowUpDate,
+        patient.nextFollowUpDate,
+        patient.currentFollowUpData && (patient.currentFollowUpData.NextFollowUpDate || patient.currentFollowUpData.nextFollowUpDate)
+    ];
+    for (const value of candidates) {
+        const normalized = toNormalizedDate(value);
+        if (normalized) return normalized;
+    }
+    return null;
+}
+
+function calculateNextFollowUpDateSafe(patient) {
+    try {
+        if (window.EpiUtils && typeof window.EpiUtils.calculateNextFollowUpDate === 'function') {
+            const result = window.EpiUtils.calculateNextFollowUpDate(patient);
+            return result instanceof Date ? result : toNormalizedDate(result);
+        }
+        if (typeof window.calculateNextFollowUpDate === 'function') {
+            const result = window.calculateNextFollowUpDate(patient);
+            return result instanceof Date ? result : toNormalizedDate(result);
+        }
+    } catch (e) {
+        window.Logger && window.Logger.warn && window.Logger.warn('calculateNextFollowUpDateSafe failed to call shared helper', e);
+    }
+
+    const lastDate = getResolvedLastFollowUpDateSafe(patient);
+    if (!lastDate) return null;
+    const nextDate = new Date(lastDate);
+    const frequency = (patient && (patient.FollowFrequency || patient.followFrequency) ? patient.FollowFrequency || patient.followFrequency : 'Monthly').toString().trim().toLowerCase();
+    switch (frequency) {
+        case 'quarterly':
+            nextDate.setMonth(nextDate.getMonth() + 3);
+            break;
+        case 'bi yearly':
+        case 'bi-yearly':
+        case 'biannual':
+            nextDate.setMonth(nextDate.getMonth() + 6);
+            break;
+        case 'monthly':
+        default:
+            nextDate.setMonth(nextDate.getMonth() + 1);
+            break;
+    }
+    nextDate.setHours(0, 0, 0, 0);
+    return nextDate;
+}
+
+function getEffectiveNextFollowUpDate(patient) {
+    return getServerProvidedNextFollowUpDate(patient) || calculateNextFollowUpDateSafe(patient);
+}
+
+function checkIfFollowUpNeedsResetSafe(patient) {
+    try {
+        if (window.EpiUtils && typeof window.EpiUtils.checkIfFollowUpNeedsReset === 'function') {
+            return window.EpiUtils.checkIfFollowUpNeedsReset(patient);
+        }
+        if (typeof window.checkIfFollowUpNeedsReset === 'function') {
+            return window.checkIfFollowUpNeedsReset(patient);
+        }
+    } catch (e) {
+        window.Logger && window.Logger.warn && window.Logger.warn('checkIfFollowUpNeedsResetSafe failed to call shared helper', e);
+    }
+
+    const nextFollowUpDate = getEffectiveNextFollowUpDate(patient);
+    if (!nextFollowUpDate) return false;
+
+    const notificationStartDate = new Date(nextFollowUpDate);
+    notificationStartDate.setDate(notificationStartDate.getDate() - 5);
+    notificationStartDate.setHours(0, 0, 0, 0);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return today >= notificationStartDate;
+}
+
 function deriveRenalFlagFromNotes(extraSources = []) {
     const normalized = [];
     const push = (val) => {
@@ -3270,14 +3394,6 @@ function renderReferredPatientList() {
         cardGrid.className = 'patient-card-grid';
 
         referredPatients.forEach(patient => {
-            const latestReferral = referredFollowUps
-                .filter(f => normalizePatientId(f.PatientID || f.patientId || f.PatientId || f.Id || f.id) === normalizePatientId(patient.ID))
-                .sort((a, b) => {
-                    const dateA = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(a.FollowUpDate || a.followUpDate) : new Date(a.FollowUpDate || a.followUpDate || 0);
-                    const dateB = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(b.FollowUpDate || b.followUpDate) : new Date(b.FollowUpDate || b.followUpDate || 0);
-                    return (dateB ? dateB.getTime() : 0) - (dateA ? dateA.getTime() : 0);
-                })[0];
-
             const card = buildFollowUpPatientCard(patient, {
                 isCompleted: false,
                 nextFollowUpDate: null,
@@ -3286,7 +3402,6 @@ function renderReferredPatientList() {
                 buttonText: 'Review Referral',
                 buttonClass: 'review-btn',
                 buttonAction: 'openFollowUpModal',
-                lastFollowUpFormatted: latestReferral ? formatDateForDisplay((typeof parseFlexibleDate === 'function') ? parseFlexibleDate(latestReferral.FollowUpDate || latestReferral.followUpDate) : new Date(latestReferral.FollowUpDate || latestReferral.followUpDate)) : 'Unknown',
                 isReferredToMO: true
             });
             // Add 'Return to PHC' (close referral) button for PHC Admins and Master Admins
@@ -4728,7 +4843,6 @@ function buildFollowUpPatientCard(patient, options = {}) {
         buttonText = 'Start Follow-up',
         buttonClass = 'start-btn',
         buttonAction = 'openFollowUpModal',
-        lastFollowUpFormatted = 'Never',
         isReferredToMO = false
     } = options;
 
@@ -4742,34 +4856,25 @@ function buildFollowUpPatientCard(patient, options = {}) {
     // Make the card discoverable via data-patient-id so in-place updates can find it
     try { card.setAttribute('data-patient-id', normalizePatientId(patient.ID || '')); } catch (e) { /* ignore */ }
 
-    // Normalize or compute last follow-up from follow-ups if patient LastFollowUp not present
-    let computedLastFollowUpFormatted = lastFollowUpFormatted || EpicareI18n.translate('label.never');
-    let lastFollowUpDateObj = null;
-    try {
-        // Prefer patient.LastFollowUp if available
-        const lastFromPatient = patient.LastFollowUp || patient.LastFollowUpDate || patient.lastFollowUp || patient.lastFollowUpDate;
-        if (lastFromPatient) {
-            const parsed = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(lastFromPatient) : (new Date(lastFromPatient));
-            if (parsed && !isNaN(parsed.getTime())) {
-                lastFollowUpDateObj = new Date(parsed);
-                computedLastFollowUpFormatted = formatDateForDisplay(parsed);
-            }
-        }
-        
-        // If still 'Never', try to get from follow-up records
-        if (computedLastFollowUpFormatted === 'Never' && typeof getLatestFollowUpForPatient === 'function') {
+    // Normalize or compute last follow-up using shared helper
+    let lastFollowUpDateObj = getResolvedLastFollowUpDateSafe(patient);
+    let computedLastFollowUpFormatted = lastFollowUpDateObj
+        ? formatDateForDisplay(lastFollowUpDateObj)
+        : EpicareI18n.translate('label.never');
+
+    if (!lastFollowUpDateObj && typeof getLatestFollowUpForPatient === 'function') {
+        try {
             const latest = getLatestFollowUpForPatient(patient.ID);
-            if (latest && (latest.FollowUpDate || latest.followUpDate || latest.SubmissionDate || latest.submissionDate)) {
-                const parsed = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(latest.FollowUpDate || latest.followUpDate || latest.SubmissionDate || latest.submissionDate) : new Date(latest.FollowUpDate || latest.followUpDate || latest.SubmissionDate || latest.submissionDate);
-                if (parsed && !isNaN(parsed.getTime())) {
-                    lastFollowUpDateObj = new Date(parsed);
+            if (latest) {
+                const parsed = toNormalizedDate(latest.FollowUpDate || latest.followUpDate || latest.SubmissionDate || latest.submissionDate);
+                if (parsed) {
+                    lastFollowUpDateObj = parsed;
                     computedLastFollowUpFormatted = formatDateForDisplay(parsed);
                 }
             }
+        } catch (e) {
+            window.Logger && window.Logger.warn && window.Logger.warn('Fallback latest follow-up lookup failed', e);
         }
-    } catch (e) {
-        // ignore errors while computing last follow-up for display
-        window.Logger && window.Logger.warn && window.Logger.warn('Error computing last follow-up for patient', patient.ID, e);
     }
 
     // Get Nearest AAM Center - check multiple possible field names from backend
@@ -4795,50 +4900,9 @@ function buildFollowUpPatientCard(patient, options = {}) {
         ? `<a href="tel:${patientPhone}" style="color: #007bff; text-decoration: none;">${patientPhone}</a>`
         : EpicareI18n.translate('label.notAvailable');
 
-    // Get current month name for completion message
-    const monthNames = [
-        EpicareI18n.translate('month.january'),
-        EpicareI18n.translate('month.february'),
-        EpicareI18n.translate('month.march'),
-        EpicareI18n.translate('month.april'),
-        EpicareI18n.translate('month.may'),
-        EpicareI18n.translate('month.june'),
-        EpicareI18n.translate('month.july'),
-        EpicareI18n.translate('month.august'),
-        EpicareI18n.translate('month.september'),
-        EpicareI18n.translate('month.october'),
-        EpicareI18n.translate('month.november'),
-        EpicareI18n.translate('month.december')
-    ];
-    const today = new Date();
-    const currentMonth = monthNames[today.getMonth()];
-    const currentYear = today.getFullYear();
+    const completionDateLabel = lastFollowUpDateObj ? formatDateForDisplay(lastFollowUpDateObj) : EpicareI18n.translate('label.notAvailable');
 
-    let completionMonth = currentMonth;
-    let completionYear = currentYear;
-
-    const fallbackMonthFromStatus = () => {
-        if (!patient || !patient.FollowUpStatus) return null;
-        const match = String(patient.FollowUpStatus).match(/completed\s+for\s+([a-z]+)\s+(\d{4})/i);
-        if (!match) return null;
-        const englishMonths = ['january','february','march','april','may','june','july','august','september','october','november','december'];
-        const idx = englishMonths.indexOf(match[1].toLowerCase());
-        const year = parseInt(match[2], 10);
-        if (idx === -1 || Number.isNaN(year)) return null;
-        return { idx, year };
-    };
-
-    if (lastFollowUpDateObj) {
-        const idx = lastFollowUpDateObj.getMonth();
-        completionMonth = monthNames[idx];
-        completionYear = lastFollowUpDateObj.getFullYear();
-    } else {
-        const parsedStatus = fallbackMonthFromStatus();
-        if (parsedStatus) {
-            completionMonth = monthNames[parsedStatus.idx] || monthNames[0];
-            completionYear = parsedStatus.year;
-        }
-    }
+    const resolvedNextFollowUpDate = nextFollowUpDate instanceof Date ? nextFollowUpDate : getEffectiveNextFollowUpDate(patient);
 
     // Header button/badge based on state
     let headerActionHtml = '';
@@ -4868,11 +4932,11 @@ function buildFollowUpPatientCard(patient, options = {}) {
         <div style="background: #d4edda; border-radius: 8px; padding: 12px; margin-top: 16px;">
             <div style="display: flex; align-items: center; gap: 8px; color: #155724;">
                 <i class="fas fa-check-circle"></i>
-                <span style="font-weight: 600;">${EpicareI18n.translate('followup.completedForMonth', { month: completionMonth, year: completionYear })}</span>
+                <span style="font-weight: 600;">${EpicareI18n.translate('followup.completedForMonth', { month: completionDateLabel, year: '' }).trim()}</span>
             </div>
-            ${nextFollowUpDate ? `
+            ${resolvedNextFollowUpDate ? `
             <div style="margin-top: 6px; color: #155724; font-size: 0.9em;">
-                ${EpicareI18n.translate('followup.nextFollowupDate', { date: formatDateForDisplay(nextFollowUpDate) })}
+                ${EpicareI18n.translate('followup.nextFollowupDate', { date: formatDateForDisplay(resolvedNextFollowUpDate) })}
             </div>` : ''}
         </div>` : '';
 
@@ -4926,12 +4990,6 @@ function buildFollowUpPatientCard(patient, options = {}) {
 
     return card;
 }
-
-// Builder: Referred-to-MO card - LEGACY: Removed as part of followUpModal unification
-// function buildReferredPatientCard(patient, latestReferral) { ... }
-
-// Builder: Tertiary-care card - LEGACY: Removed as part of followUpModal unification
-// function buildTertiaryPatientCard(patient) { ... }
 
 function renderFollowUpPatientList(phc, searchTerm = "") {
     const container = document.getElementById('followUpPatientListContainer');
@@ -4999,177 +5057,37 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
         return false;
     }
 
-    // Helper: resolve last follow-up date from various backend fields
-    function resolveLastFollowUpDateLocal(patient) {
-        if (!patient) return null;
-        const candidates = [
-            patient.LastFollowUp,
-            patient.LastFollowUpDate,
-            patient.lastFollowUp,
-            patient.lastFollowUpDate,
-            patient.FollowUpDate,
-            patient.followUpDate,
-            patient.currentFollowUpData && (patient.currentFollowUpData.FollowUpDate || patient.currentFollowUpData.followUpDate)
-        ];
-
-        for (const candidate of candidates) {
-            if (!candidate) continue;
-            let parsed = null;
-            try {
-                if (typeof parseFlexibleDate === 'function') {
-                    parsed = parseFlexibleDate(candidate);
-                } else {
-                    parsed = new Date(candidate);
-                }
-            } catch (e) {
-                parsed = null;
-            }
-            if (parsed && !isNaN(parsed.getTime())) {
-                parsed.setHours(0, 0, 0, 0);
-                return parsed;
-            }
-        }
-        return null;
-    }
-
-    // Helper: check if follow-up is due or overdue (within 5 days before or after due date)
-    function checkIfFollowUpNeedsReset(patient) {
-        // Prefer shared implementation from utils.js if available
-        try {
-            if (typeof window !== 'undefined') {
-                if (window.EpiUtils && typeof window.EpiUtils.checkIfFollowUpNeedsReset === 'function') {
-                    return window.EpiUtils.checkIfFollowUpNeedsReset(patient);
-                }
-                if (typeof window.checkIfFollowUpNeedsReset === 'function') {
-                    if (window.checkIfFollowUpNeedsReset !== checkIfFollowUpNeedsReset) {
-                        return window.checkIfFollowUpNeedsReset(patient);
-                    }
-                }
-            }
-        } catch (e) {
-            window.Logger && window.Logger.warn('checkIfFollowUpNeedsReset wrapper failed to call global impl', e);
-        }
-
-        const nextFollowUpDate = (typeof calculateNextFollowUpDate === 'function') ? calculateNextFollowUpDate(patient) : null;
-        if (!nextFollowUpDate) return false;
-
-        const notificationStartDate = new Date(nextFollowUpDate);
-        notificationStartDate.setDate(notificationStartDate.getDate() - 5);
-        notificationStartDate.setHours(0, 0, 0, 0);
-
-        const today = new Date();
-        today.setHours(0, 0, 0, 0); // Normalize to start of day
-
-        return today >= notificationStartDate;
-    }
-
-    // Helper: get completion month from follow-up status
-    function getCompletionMonth(followUpStatus) {
-        if (!followUpStatus) return 'Unknown';
-        const months = ['January', 'February', 'March', 'April', 'May', 'June',
-                       'July', 'August', 'September', 'October', 'November', 'December'];
-        const currentMonth = new Date().getMonth();
-        return months[currentMonth] || 'Current Month';
-    }
-
-    // Helper: calculate next follow-up date (delegates to utils.calculateNextFollowUpDate when available)
-    function calculateNextFollowUpDate(patient) {
-        try {
-            if (typeof window !== 'undefined') {
-                if (window.EpiUtils && typeof window.EpiUtils.calculateNextFollowUpDate === 'function') {
-                    return window.EpiUtils.calculateNextFollowUpDate(patient);
-                }
-                if (typeof window.calculateNextFollowUpDate === 'function') {
-                    if (window.calculateNextFollowUpDate !== calculateNextFollowUpDate) {
-                        return window.calculateNextFollowUpDate(patient);
-                    }
-                }
-            }
-        } catch (e) {
-            window.Logger && window.Logger.warn('calculateNextFollowUpDate wrapper failed to call global impl', e);
-        }
-
-        const lastDate = resolveLastFollowUpDateLocal(patient);
-        if (!lastDate) return null;
-
-        const nextDate = new Date(lastDate);
-        const frequency = (patient && (patient.FollowFrequency || patient.followFrequency) ? patient.FollowFrequency || patient.followFrequency : 'Monthly').toString().trim().toLowerCase();
-        switch (frequency) {
-            case 'quarterly':
-                nextDate.setMonth(nextDate.getMonth() + 3);
-                break;
-            case 'bi yearly':
-            case 'bi-yearly':
-            case 'biannual':
-                nextDate.setMonth(nextDate.getMonth() + 6);
-                break;
-            case 'monthly':
-            default:
-                nextDate.setMonth(nextDate.getMonth() + 1);
-                break;
-        }
-        nextDate.setHours(0, 0, 0, 0);
-        try { window.Logger && window.Logger.debug && window.Logger.debug(`Next follow-up date for patient ${patient && patient.ID ? patient.ID : 'unknown'}: ${nextDate.toISOString().split('T')[0]} (${frequency})`); } catch (e) { /* ignore */ }
-        return nextDate;
-    }
-
     // Helper: check if follow-up is completed (for display purposes)
     function isFollowUpCompleted(patient) {
         try {
             if (!patient) return false;
 
-            // Normalize follow-up status text
             const status = (patient.FollowUpStatus || patient.followUpStatus || '').toString().trim().toLowerCase();
-
-            // Check if server explicitly marks as completed
             const looksCompleted = status.includes('completed') || /completed for/i.test(patient.FollowUpStatus || '');
 
-            // Determine next follow-up date: prefer server-provided NextFollowUpDate, else compute
-            let nextDate = null;
-            if (patient.NextFollowUpDate) {
-                nextDate = parseFlexibleDate(patient.NextFollowUpDate) || parseFlexibleDate(patient.nextFollowUpDate) || null;
-            }
-            if (!nextDate) {
-                nextDate = calculateNextFollowUpDate(patient);
-            }
-
+            const nextDate = getEffectiveNextFollowUpDate(patient);
             const today = new Date();
             today.setHours(0, 0, 0, 0);
 
-            // NEW LOGIC: Check if patient has a recent LastFollowUp that puts them in "completed" state
-            // A patient is "completed" if their last follow-up was within the current follow-up cycle
-            // (i.e., today is before the 5-day-before-due-date window)
-            const lastFollowUp = patient.LastFollowUp || patient.LastFollowUpDate || patient.lastFollowUp;
-            if (lastFollowUp) {
-                const parsedLast = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(lastFollowUp) : new Date(lastFollowUp);
-                if (parsedLast && !isNaN(parsedLast.getTime())) {
-                    parsedLast.setHours(0, 0, 0, 0);
-                    
-                    // If last follow-up was today or very recent, consider completed
-                    // "Recent" = within the last few days (grace period for same-day processing)
-                    const daysSinceLast = Math.floor((today - parsedLast) / (1000 * 60 * 60 * 24));
-                    
-                    if (nextDate) {
-                        nextDate.setHours(0, 0, 0, 0);
-                        // 5 days before the next due date is when follow-up becomes "active" again
-                        const fiveBefore = new Date(nextDate);
-                        fiveBefore.setDate(fiveBefore.getDate() - 5);
+            const parsedLast = getResolvedLastFollowUpDateSafe(patient);
+            if (parsedLast) {
+                const normalizedLast = new Date(parsedLast);
+                normalizedLast.setHours(0, 0, 0, 0);
+                const daysSinceLast = Math.floor((today - normalizedLast) / (1000 * 60 * 60 * 24));
 
-                        // If today is before the activation window, the follow-up is completed for this cycle
-                        if (today < fiveBefore) {
-                            return true; // Completed for this cycle
-                        }
-                    } else {
-                        // No nextDate available - if last follow-up was within 25 days, consider completed
-                        // (assuming monthly = 30 days, 5 days before = 25 days grace)
-                        if (daysSinceLast <= 25) {
-                            return true;
-                        }
+                if (nextDate) {
+                    const normalizedNext = new Date(nextDate);
+                    normalizedNext.setHours(0, 0, 0, 0);
+                    const fiveBefore = new Date(normalizedNext);
+                    fiveBefore.setDate(fiveBefore.getDate() - 5);
+                    if (today < fiveBefore) {
+                        return true;
                     }
+                } else if (daysSinceLast <= 25) {
+                    return true;
                 }
             }
 
-            // Fallback: if server explicitly says completed and no date logic available
             if (looksCompleted) return true;
 
             return false;
@@ -5259,8 +5177,8 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
 
     patientsForFollowUp.forEach(patient => {
         const isCompleted = isFollowUpCompleted(patient);
-        const nextFollowUpDate = calculateNextFollowUpDate(patient);
-        const isDue = checkIfFollowUpNeedsReset(patient);
+        const nextFollowUpDate = getEffectiveNextFollowUpDate(patient);
+        const isDue = checkIfFollowUpNeedsResetSafe(patient);
         const patientPhone = patient.Phone || patient.PhoneNumber || 'N/A';
         
         // Determine button text and action based on role and patient status
@@ -5274,34 +5192,6 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
             buttonAction = 'openFollowUpModal';
         }
         
-        // Format last follow-up date - check patient field first, then look up from follow-up records
-        let lastFollowUpFormatted = 'Never';
-        const lastFromPatient = patient.LastFollowUp || patient.LastFollowUpDate || patient.lastFollowUp || patient.lastFollowUpDate;
-        if (lastFromPatient) {
-            const parsedLastFollowUp = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(lastFromPatient) : new Date(lastFromPatient);
-            if (parsedLastFollowUp && !isNaN(parsedLastFollowUp.getTime())) {
-                lastFollowUpFormatted = formatDateForDisplay(parsedLastFollowUp);
-            }
-        }
-        
-        // If still 'Never', try to get from follow-up records
-        if (lastFollowUpFormatted === 'Never' && typeof getLatestFollowUpForPatient === 'function') {
-            try {
-                const latestFU = getLatestFollowUpForPatient(patient.ID);
-                if (latestFU) {
-                    const fuDate = latestFU.FollowUpDate || latestFU.followUpDate || latestFU.SubmissionDate || latestFU.submissionDate;
-                    if (fuDate) {
-                        const parsedFU = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(fuDate) : new Date(fuDate);
-                        if (parsedFU && !isNaN(parsedFU.getTime())) {
-                            lastFollowUpFormatted = formatDateForDisplay(parsedFU);
-                        }
-                    }
-                }
-            } catch (e) {
-                // Ignore errors in fallback lookup
-            }
-        }
-
         const isReferredToMO = (currentUserRole === 'phc_admin' && (patient.PatientStatus || '').toLowerCase() === 'referred to mo');
 
         const card = buildFollowUpPatientCard(patient, {
@@ -5312,7 +5202,6 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
             buttonText,
             buttonClass,
             buttonAction,
-            lastFollowUpFormatted,
             isReferredToMO
         });
 
@@ -5323,35 +5212,6 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
 }
 
 // Developer helper - debug follow-up card status calculation for a patient
-window._followUpCardDebug = function(patientId) {
-    try {
-        if (!window.allPatients || !Array.isArray(window.allPatients)) {
-            console.warn('FollowUp Debug: allPatients not available');
-            return null;
-        }
-        const pid = String(patientId || '').trim();
-        const patient = window.allPatients.find(p => String(p.ID) === pid || String(p.Id) === pid || String(p.patientId) === pid);
-        if (!patient) { console.warn('FollowUp Debug: patient not found', patientId); return null; }
-        const last = patient.LastFollowUp || patient.lastFollowUp || patient.LastFollowUpDate;
-        const nextField = patient.NextFollowUpDate || patient.nextFollowUpDate;
-        const status = (patient.FollowUpStatus || patient.followUpStatus || '').toString();
-        const freq = patient.FollowFrequency || patient.followFrequency || 'Monthly';
-        const parsedLast = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(last) : new Date(last);
-        const computedNext = calculateNextFollowUpDate ? calculateNextFollowUpDate(patient) : null;
-        const parsedNextField = nextField ? ((typeof parseFlexibleDate === 'function') ? parseFlexibleDate(nextField) : new Date(nextField)) : null;
-        const isCompleted = isFollowUpCompleted(patient);
-        const isDue = (function(){ try { return checkIfFollowUpNeedsReset(patient); } catch(e) { return false; } })();
-        console.groupCollapsed(`FollowUp Debug - ${patient.PatientName || patient.ID}`);
-        console.table({ ID: patient.ID, Name: patient.PatientName, Phone: patient.Phone, PHC: patient.PHC, LastFollowUp: last, ParsedLast: parsedLast, NextFollowUpField: nextField, ParsedNextField: parsedNextField, ComputedNext: computedNext, FollowUpStatus: status, Frequency: freq, isCompleted, isDue });
-        console.log('Raw patient object:', patient);
-        console.groupEnd();
-        return { patient, last, parsedLast, parsedNextField, computedNext, status, freq, isCompleted, isDue };
-    } catch (err) {
-        console.warn('FollowUp Debug: error', err);
-        return null;
-    }
-};
-
 // Clinical Decision Support System for MO Role
 
 // Tertiary Care Queue Management (Master Admin Only)
@@ -6654,11 +6514,7 @@ function updatePatientCardUI(patientId, followUpData) {
         try { ensurePatientStatusFromFollowUp(updatedPatient, followUpData); } catch (e) {}
         removeCardFromAllContainers(patientId);
         try {
-            // Only add to referred list if the patient is visible to current user or the UI is master/PHC admin
             if (referredContainer && (isPatientVisibleToCurrentUser(updatedPatient) || currentUserRole === 'master_admin' || currentUserRole === 'phc_admin')) {
-                // Build a referral-style card to show in referred list
-                const parsedLastFU = updatedPatient.LastFollowUp ? ((typeof parseFlexibleDate === 'function') ? parseFlexibleDate(updatedPatient.LastFollowUp) : new Date(updatedPatient.LastFollowUp)) : null;
-                const lastFollowUpFormatted = (parsedLastFU && !isNaN(parsedLastFU.getTime())) ? formatDateForDisplay(parsedLastFU) : 'Never';
                 const card = buildFollowUpPatientCard(updatedPatient, {
                     isCompleted: false,
                     nextFollowUpDate: null,
@@ -6667,7 +6523,6 @@ function updatePatientCardUI(patientId, followUpData) {
                     buttonText: 'Review Referral',
                     buttonClass: 'review-btn',
                     buttonAction: 'openFollowUpModal',
-                    lastFollowUpFormatted: lastFollowUpFormatted,
                     isReferredToMO: true
                 });
 
@@ -6701,18 +6556,14 @@ function updatePatientCardUI(patientId, followUpData) {
         try {
             if (currentContainer && (isPatientVisibleToCurrentUser(updatedPatient) || currentUserRole === 'master_admin')) {
                 // Build a fresh card for the returned patient and insert at the top
-                const parsedLastFU = updatedPatient.LastFollowUp ? ((typeof parseFlexibleDate === 'function') ? parseFlexibleDate(updatedPatient.LastFollowUp) : new Date(updatedPatient.LastFollowUp)) : null;
-                const lastFollowUpFormatted = (parsedLastFU && !isNaN(parsedLastFU.getTime())) ? formatDateForDisplay(parsedLastFU) : 'Never';
-                const nextFollowUpDate = (typeof calculateNextFollowUpDate === 'function') ? calculateNextFollowUpDate(updatedPatient) : null;
                 const card = buildFollowUpPatientCard(updatedPatient, {
                     isCompleted: false,
-                    nextFollowUpDate: nextFollowUpDate,
-                    isDue: (typeof checkIfFollowUpNeedsReset === 'function') ? checkIfFollowUpNeedsReset(updatedPatient) : false,
+                    nextFollowUpDate: getEffectiveNextFollowUpDate(updatedPatient),
+                    isDue: checkIfFollowUpNeedsResetSafe(updatedPatient),
                     patientPhone: updatedPatient.Phone || updatedPatient.PhoneNumber || 'N/A',
                     buttonText: 'Start Follow-up',
                     buttonClass: 'start-btn',
-                    buttonAction: 'openFollowUpModal',
-                    lastFollowUpFormatted: lastFollowUpFormatted
+                    buttonAction: 'openFollowUpModal'
                 });
 
                 // Insert into existing grid or create a new grid region
@@ -6749,8 +6600,6 @@ function updatePatientCardUI(patientId, followUpData) {
         if (tertiaryContainer && (isPatientVisibleToCurrentUser(updatedPatient) || currentUserRole === 'master_admin' || currentUserRole === 'phc_admin')) {
             // Remove any existing card everywhere, then add to tertiary list
             removeCardFromAllContainers(patientId);
-            const parsedLastFU = updatedPatient.LastFollowUp ? ((typeof parseFlexibleDate === 'function') ? parseFlexibleDate(updatedPatient.LastFollowUp) : new Date(updatedPatient.LastFollowUp)) : null;
-            const lastFollowUpFormatted = (parsedLastFU && !isNaN(parsedLastFU.getTime())) ? formatDateForDisplay(parsedLastFU) : 'Never';
             const card = buildFollowUpPatientCard(updatedPatient, {
                 isCompleted: false,
                 nextFollowUpDate: null,
@@ -6759,7 +6608,6 @@ function updatePatientCardUI(patientId, followUpData) {
                 buttonText: 'Tertiary - View',
                 buttonClass: 'view-tertiary-btn',
                 buttonAction: 'openFollowUpModal',
-                lastFollowUpFormatted: lastFollowUpFormatted,
                 isReferredToMO: false
             });
 
@@ -6815,8 +6663,7 @@ function updatePatientCardUI(patientId, followUpData) {
             try { nextFollowUpDate = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(followUpData.NextFollowUpDate || followUpData.nextFollowUpDate) : new Date(followUpData.NextFollowUpDate || followUpData.nextFollowUpDate); } catch (e) { nextFollowUpDate = null; }
         }
         if (!nextFollowUpDate) {
-            // compute from patient's LastFollowUp if available
-            try { nextFollowUpDate = (typeof calculateNextFollowUpDate === 'function') ? calculateNextFollowUpDate(updatedPatient) : (function(){ const d = new Date(); d.setDate(d.getDate()+30); return d; })(); } catch (e) { nextFollowUpDate = (function(){ const d = new Date(); d.setDate(d.getDate()+30); return d; })(); }
+            nextFollowUpDate = getEffectiveNextFollowUpDate(updatedPatient);
         }
 
         // Update in-memory patient state if server hasn't supplied it
@@ -6852,28 +6699,28 @@ function updatePatientCardUI(patientId, followUpData) {
                 const prev = cardDetails.querySelector('.completion-notice');
                 if (prev) prev.remove();
 
-                const nextDueHtml = `
-                    <div class="detail-item completion-notice">
-                        <span class="detail-label">
-                            <i class="fas fa-calendar-check text-success"></i> Next Due:
-                        </span>
-                        <span class="detail-value">${formatDateForDisplay(nextFollowUpDate)}</span>
-                    </div>`;
+                if (nextFollowUpDate) {
+                    const nextDueHtml = `
+                        <div class="detail-item completion-notice">
+                            <span class="detail-label">
+                                <i class="fas fa-calendar-check text-success"></i> Next Due:
+                            </span>
+                            <span class="detail-value">${formatDateForDisplay(nextFollowUpDate)}</span>
+                        </div>`;
 
-                // Prefer to insert after the Last Follow-up detail if present
-                let inserted = false;
-                const detailItems = Array.from(cardDetails.querySelectorAll('.detail-item'));
-                for (const di of detailItems) {
-                    const lbl = di.querySelector('.detail-label');
-                    if (lbl && lbl.textContent && lbl.textContent.toLowerCase().includes('last follow-up')) {
-                        di.insertAdjacentHTML('afterend', nextDueHtml);
-                        inserted = true;
-                        break;
+                    let inserted = false;
+                    const detailItems = Array.from(cardDetails.querySelectorAll('.detail-item'));
+                    for (const di of detailItems) {
+                        const lbl = di.querySelector('.detail-label');
+                        if (lbl && lbl.textContent && lbl.textContent.toLowerCase().includes('last follow-up')) {
+                            di.insertAdjacentHTML('afterend', nextDueHtml);
+                            inserted = true;
+                            break;
+                        }
                     }
-                }
-                if (!inserted) {
-                    // fallback: append at end
-                    cardDetails.insertAdjacentHTML('beforeend', nextDueHtml);
+                    if (!inserted) {
+                        cardDetails.insertAdjacentHTML('beforeend', nextDueHtml);
+                    }
                 }
             }
         } catch (e) {
@@ -6920,8 +6767,6 @@ function updatePatientCardUI(patientId, followUpData) {
         // If no existing card found, insert a new card into the current container (avoid full reload)
         try {
             if (currentContainer) {
-                const parsedLastFU = updatedPatient.LastFollowUp ? ((typeof parseFlexibleDate === 'function') ? parseFlexibleDate(updatedPatient.LastFollowUp) : new Date(updatedPatient.LastFollowUp)) : null;
-                const lastFollowUpFormatted = (parsedLastFU && !isNaN(parsedLastFU.getTime())) ? formatDateForDisplay(parsedLastFU) : 'Never';
                 const card = buildFollowUpPatientCard(updatedPatient, {
                     isCompleted: true,
                     nextFollowUpDate: nextFollowUpDate || null,
@@ -6929,8 +6774,7 @@ function updatePatientCardUI(patientId, followUpData) {
                     patientPhone: updatedPatient.Phone || updatedPatient.PhoneNumber || 'N/A',
                     buttonText: 'Follow-up Complete',
                     buttonClass: 'completed-btn',
-                    buttonAction: 'openFollowUpModal',
-                    lastFollowUpFormatted: lastFollowUpFormatted
+                    buttonAction: 'openFollowUpModal'
                 });
 
                 // Insert into existing grid or create a new grid region

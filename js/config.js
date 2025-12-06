@@ -6,7 +6,7 @@
 // ENVIRONMENT & PRODUCTION MODE
 // =====================================================
 // Set to false in production to disable debug console logs
-const IS_PRODUCTION = false;  // Toggle this for development vs production
+const IS_PRODUCTION = true;  // Toggle this for development vs production
 const ENVIRONMENT = IS_PRODUCTION ? 'production' : 'development';
 
 // =====================================================

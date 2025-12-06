@@ -3309,6 +3309,30 @@ function renderStats() {
     const endOfWeek = new Date(now);
     endOfWeek.setDate(now.getDate() - now.getDay() + 6);
 
+    function isPatientDueForCurrentCycle(patient) {
+        try {
+            if (typeof checkIfFollowUpNeedsResetSafe === 'function') {
+                return !!checkIfFollowUpNeedsResetSafe(patient);
+            }
+            if (typeof checkIfFollowUpNeedsReset === 'function') {
+                return !!checkIfFollowUpNeedsReset(patient);
+            }
+        } catch (e) {
+            window.Logger && window.Logger.warn && window.Logger.warn('Dashboard due helper failed via global helper, falling back to local calc', e);
+        }
+
+        const lastFollowUpDate = getPatientLastFollowUpDate(patient);
+        if (!lastFollowUpDate) return false;
+        const nextDueDate = new Date(lastFollowUpDate);
+        nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+        const notificationStartDate = new Date(nextDueDate);
+        notificationStartDate.setDate(notificationStartDate.getDate() - 5);
+        notificationStartDate.setHours(0, 0, 0, 0);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return today >= notificationStartDate;
+    }
+
     // Helper function to get last follow-up date for a patient
     // Checks patient.LastFollowUp first, then looks up from follow-up records
     // Falls back to RegistrationDate for patients who have never had a follow-up
@@ -3350,14 +3374,7 @@ function renderStats() {
     }
 
     // Enhanced KPI calculations - check both patient record and follow-up records
-    const overdueFollowUps = filteredPatients.filter(p => {
-        const lastFollowUpDate = getPatientLastFollowUpDate(p);
-        if (!lastFollowUpDate) return false;
-
-        const nextDueDate = new Date(lastFollowUpDate);
-        nextDueDate.setMonth(nextDueDate.getMonth() + 1);
-        return new Date() > nextDueDate;
-    }).length;
+    const overdueFollowUps = filteredPatients.filter(p => isPatientDueForCurrentCycle(p)).length;
 
     const dueThisWeek = filteredPatients.filter(p => {
         const lastFollowUpDate = getPatientLastFollowUpDate(p);

@@ -96,25 +96,30 @@ if (typeof window !== 'undefined') {
     window.parseDateFlexible = parseDateFlexible;
     // Backwards compatibility: some modules use `parseFlexibleDate`
     window.parseFlexibleDate = parseDateFlexible;
+    window.formatDateInDDMMYYYY = formatDateInDDMMYYYY;
+}
+
+function formatDateInDDMMYYYY(dateInput) {
+    if (dateInput === null || dateInput === undefined || dateInput === '') return 'N/A';
+    let parsed;
+    if (typeof parseDateFlexible === 'function') {
+        parsed = parseDateFlexible(dateInput);
+    }
+    if (!parsed) {
+        parsed = dateInput instanceof Date ? dateInput : new Date(dateInput);
+    }
+    if (!parsed || isNaN(parsed.getTime())) return 'N/A';
+    const dd = String(parsed.getDate()).padStart(2, '0');
+    const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+    const yyyy = String(parsed.getFullYear());
+    return `${dd}-${mm}-${yyyy}`;
 }
 
 function formatDateForDisplay(date) {
     if (window.DateUtils && typeof window.DateUtils.formatForDisplay === 'function') {
         return window.DateUtils.formatForDisplay(date);
     }
-    if (!date) return 'N/A';
-    const fallback = new Date(date);
-    if (isNaN(fallback.getTime())) return date;
-    // Use en-GB (dd/mm/yyyy) but convert slashes to dashes for preferred DD-MM-YYYY format
-    try {
-        return fallback.toLocaleDateString('en-GB').replace(/\//g, '-');
-    } catch (e) {
-        // Fallback to manual formatting
-        const dd = String(fallback.getDate()).padStart(2, '0');
-        const mm = String(fallback.getMonth() + 1).padStart(2, '0');
-        const yyyy = String(fallback.getFullYear());
-        return `${dd}-${mm}-${yyyy}`;
-    }
+    return formatDateInDDMMYYYY(date);
 }
 
 /**

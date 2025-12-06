@@ -255,7 +255,12 @@ async function loadPatientSeizureVideos(patientId) {
             if (videos.length > 0) {
                 let html = '';
                 videos.forEach(video => {
-                    const uploadDate = new Date(video.uploadDate).toLocaleDateString();
+                    const parsedUploadDate = new Date(video.uploadDate);
+                    const uploadDate = (typeof formatDateForDisplay === 'function')
+                        ? formatDateForDisplay(parsedUploadDate)
+                        : (typeof formatDateInDDMMYYYY === 'function'
+                            ? formatDateInDDMMYYYY(parsedUploadDate)
+                            : parsedUploadDate.toLocaleDateString('en-GB').replace(/\//g, '-'));
                     const duration = video.duration ? Math.floor(video.duration) + 's' : (window.EpicareI18n ? window.EpicareI18n.translate('seizureVideo.unknown') : 'Unknown');
                     html += `
                         <div style="padding: 12px; background: white; border-radius: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">

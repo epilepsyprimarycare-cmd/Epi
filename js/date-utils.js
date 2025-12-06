@@ -83,20 +83,25 @@
         var d = parse(dateInput);
         if (!d) return options.fallback || 'N/A';
 
-        var locale = options.locale;
-        if (!locale && global.EpicareI18n && typeof global.EpicareI18n.getCurrentLang === 'function') {
-            locale = global.EpicareI18n.getCurrentLang();
-        }
-        if (!locale) {
-            locale = 'en-GB';
+        // Allow callers to explicitly opt-in to locale aware output (e.g., for logging)
+        if (options.forceLocaleFormat) {
+            var locale = options.locale;
+            if (!locale && global.EpicareI18n && typeof global.EpicareI18n.getCurrentLang === 'function') {
+                locale = global.EpicareI18n.getCurrentLang();
+            }
+            if (!locale) {
+                locale = 'en-GB';
+            }
+            var formatOptions = options.formatOptions || { day: '2-digit', month: '2-digit', year: 'numeric' };
+            try {
+                return d.toLocaleDateString(locale, formatOptions);
+            } catch (err) {
+                // fall through to DD-MM-YYYY formatting below
+            }
         }
 
-        var formatOptions = options.formatOptions || { day: '2-digit', month: '2-digit', year: 'numeric' };
-        try {
-            return d.toLocaleDateString(locale, formatOptions);
-        } catch (err) {
-            return formatDateDDMMYYYY(d);
-        }
+        // Default user-facing format for India: DD-MM-YYYY
+        return pad2(d.getDate()) + '-' + pad2(d.getMonth() + 1) + '-' + d.getFullYear();
     }
 
     function formatForFilename(dateInput) {

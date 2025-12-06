@@ -4857,7 +4857,8 @@ function buildFollowUpPatientCard(patient, options = {}) {
         isReturnedFromReferral = false,
         isDueForCurrentMonth = false,
         medicationsFromMO = null,
-        referralDate = null
+        referralDate = null,
+        awaitingReferralCompletion = false
     } = options;
 
     const card = document.createElement('div');
@@ -4927,7 +4928,12 @@ function buildFollowUpPatientCard(patient, options = {}) {
 
     // Header button/badge based on state
     let headerActionHtml = '';
-    if (isCompleted) {
+    if (awaitingReferralCompletion) {
+        const awaitingLabel = window.EpicareI18n ? window.EpicareI18n.translate('followup.awaitingMedicalOfficer') : 'Awaiting Medical Officer follow-up';
+        headerActionHtml = `<span style="background: #ffe9c6; color: #8a5800; padding: 8px 16px; border-radius: 20px; font-size: 0.9em; display: inline-flex; align-items: center; gap: 6px;">
+            <i class="fas fa-user-md"></i> ${awaitingLabel}
+        </span>`;
+    } else if (isCompleted) {
         headerActionHtml = `<span style="background: #6c757d; color: white; padding: 8px 16px; border-radius: 20px; font-size: 0.9em; display: inline-flex; align-items: center; gap: 6px;">
             <i class="fas fa-check"></i> ${EpicareI18n.translate('label.completed')}
         </span>`;
@@ -5249,13 +5255,27 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
         const patientPhone = patient.Phone || patient.PhoneNumber || 'N/A';
         const statusText = (patient.FollowUpStatus || patient.followUpStatus || '').toString().trim().toLowerCase();
         const isPending = statusText === 'pending';
-        const canStartFollowUp = !isCompleted || isDue || isPending;
-        const isReturnedFromReferral = isPending && (patient.LastFollowUp || patient.LastFollowUpDate) && (patient.NextFollowUpDate || patient.nextFollowUpDate);
-        const isDueForCurrentMonth = isReturnedFromReferral ? checkIfDueForCurrentMonth(patient) : false;
+        let canStartFollowUp = !isCompleted || isDue || isPending;
         const latestFollowUpRecord = (typeof getLatestFollowUpForPatient === 'function') ? getLatestFollowUpForPatient(patient.ID) : null;
-        const isReferredToMOCard = latestFollowUpRecord ? (isAffirmative(latestFollowUpRecord.ReferredToMO) && !isAffirmative(latestFollowUpRecord.ReferralClosed)) : false;
+        const wasPreviouslyReferred = latestFollowUpRecord ? isAffirmative(latestFollowUpRecord.ReferredToMO) : false;
+        const referralClosedByMO = latestFollowUpRecord ? (
+            isAffirmative(latestFollowUpRecord.ReferralClosed) ||
+            isAffirmative(latestFollowUpRecord.returnToPhc || latestFollowUpRecord.ReturnToPhc || latestFollowUpRecord.returnToPHC) ||
+            (latestFollowUpRecord.ReferralAction || '').toString().toLowerCase() === 'returntofacility'
+        ) : false;
+        const patientStatus = (patient.PatientStatus || patient.Status || '').toString().trim().toLowerCase();
+        const statusSaysReferred = patientStatus.includes('referred to mo') || patientStatus.includes('referred to medical officer');
+        const isReferredToMOCard = latestFollowUpRecord
+            ? (wasPreviouslyReferred && !referralClosedByMO)
+            : statusSaysReferred;
+        const isReturnedFromReferral = referralClosedByMO || (!statusSaysReferred && wasPreviouslyReferred);
+        const isDueForCurrentMonth = isReturnedFromReferral ? checkIfDueForCurrentMonth(patient) : false;
         const referralDate = latestFollowUpRecord ? (latestFollowUpRecord.ReferralDate || latestFollowUpRecord.FollowUpDate || latestFollowUpRecord.SubmissionDate) : null;
         const medicationsFromMO = (isReturnedFromReferral && Array.isArray(patient.Medications) && patient.Medications.length > 0) ? patient.Medications : null;
+        const awaitingReferralCompletion = isReferredToMOCard && !isReturnedFromReferral;
+        if (awaitingReferralCompletion) {
+            canStartFollowUp = false;
+        }
         
         // Determine button text and action based on role and patient status
         let buttonText = window.EpicareI18n ? window.EpicareI18n.translate('button.startFollowup') : 'Start Follow-up';
@@ -5288,7 +5308,8 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
             referralDate,
             isReturnedFromReferral,
             isDueForCurrentMonth,
-            medicationsFromMO
+            medicationsFromMO,
+            awaitingReferralCompletion
         });
 
         cardGrid.appendChild(card);
@@ -6051,8 +6072,11 @@ if (followUpFormEl && !followUpFormEl.dataset._followupHandlerAttached) {
             } else if (typeof formatDateForDisplay === 'function') {
                 data.SubmissionDate = formatDateForDisplay(new Date());
             } else {
-                // fallback to en-GB local date which is day-first
-                data.SubmissionDate = new Date().toLocaleDateString('en-GB');
+                // fallback to explicit DD-MM-YYYY to keep UI consistent
+                const now = new Date();
+                data.SubmissionDate = (typeof formatDateInDDMMYYYY === 'function')
+                    ? formatDateInDDMMYYYY(now)
+                    : `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
             }
             // Ensure FollowUpDate is converted to DD/MM/YYYY for storage
             if (!data.FollowUpDate || String(data.FollowUpDate).trim() === '') {
@@ -6067,7 +6091,9 @@ if (followUpFormEl && !followUpFormEl.dataset._followupHandlerAttached) {
                         } else if (typeof formatDateForDisplay === 'function') {
                             data.FollowUpDate = formatDateForDisplay(parsed);
                         } else {
-                            data.FollowUpDate = parsed.toLocaleDateString('en-GB');
+                            data.FollowUpDate = (typeof formatDateInDDMMYYYY === 'function')
+                                ? formatDateInDDMMYYYY(parsed)
+                                : `${String(parsed.getDate()).padStart(2, '0')}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${parsed.getFullYear()}`;
                         }
                     }
                 } catch (e) {

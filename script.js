@@ -1,6 +1,17 @@
 // --- I18N LANGUAGE SWITCHER ---
 console.log('[APP] script.js loaded');
 
+if (typeof window.formatDateInDDMMYYYY !== 'function') {
+    window.formatDateInDDMMYYYY = function(dateObj) {
+        if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) return 'N/A';
+        const dd = String(dateObj.getDate()).padStart(2, '0');
+        const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const yyyy = dateObj.getFullYear();
+        return `${dd}-${mm}-${yyyy}`;
+    };
+}
+const formatDateInDDMMYYYY = window.formatDateInDDMMYYYY;
+
 // --- CRITICAL FIX: Define showPatientDetails immediately at the top ---
 // This ensures the function is available even if the script crashes later.
 window.showPatientDetails = function(patientId) {
@@ -46,7 +57,7 @@ window.showPatientDetails = function(patientId) {
         if (!dateVal) return 'N/A';
         const parsed = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(dateVal) : new Date(dateVal);
         if (!parsed || isNaN(parsed.getTime())) return 'N/A';
-        return (typeof formatDateForDisplay === 'function') ? formatDateForDisplay(parsed) : parsed.toLocaleDateString('en-GB');
+        return (typeof formatDateForDisplay === 'function') ? formatDateForDisplay(parsed) : formatDateInDDMMYYYY(parsed);
     };
 
     // --- Build the HTML for the detailed view ---
@@ -249,7 +260,7 @@ window.renderPatientTimeline = function(patient, followUps) {
             if (!dateVal) return 'Unknown';
             const parsed = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(dateVal) : new Date(dateVal);
             if (!parsed || isNaN(parsed.getTime())) return 'Unknown';
-            return (typeof formatDateForDisplay === 'function') ? formatDateForDisplay(parsed) : parsed.toLocaleDateString('en-GB');
+            return (typeof formatDateForDisplay === 'function') ? formatDateForDisplay(parsed) : formatDateInDDMMYYYY(parsed);
         };
 
         // Registration / enrollment
@@ -4909,7 +4920,10 @@ function renderFollowUpTrendChart() {
 
     // 7. Render chart
     const sortedMonths = Object.keys(monthlyFollowUps).sort();
-    const chartLabels = sortedMonths.map(month => new Date(month + '-01').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }));
+    const chartLabels = sortedMonths.map(month => {
+        const dateObj = new Date(`${month}-01T00:00:00`);
+        return (typeof formatDateForDisplay === 'function') ? formatDateForDisplay(dateObj) : formatDateInDDMMYYYY(dateObj);
+    });
     const chartData = sortedMonths.map(month => monthlyFollowUps[month]);
 
     console.log('[FollowUpTrendChart] Chart labels:', chartLabels);
@@ -8407,7 +8421,7 @@ function showPatientDetails(patientId) {
         if (!dateVal) return 'N/A';
         const parsed = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(dateVal) : new Date(dateVal);
         if (!parsed || isNaN(parsed.getTime())) return 'N/A';
-        return (typeof formatDateForDisplay === 'function') ? formatDateForDisplay(parsed) : parsed.toLocaleDateString('en-GB');
+        return (typeof formatDateForDisplay === 'function') ? formatDateForDisplay(parsed) : formatDateInDDMMYYYY(parsed);
     };
 
     // --- Build the HTML for the detailed view ---
@@ -8617,7 +8631,7 @@ function renderPatientTimeline(patient, followUps) {
             if (!dateVal) return 'Unknown';
             const parsed = (typeof parseFlexibleDate === 'function') ? parseFlexibleDate(dateVal) : new Date(dateVal);
             if (!parsed || isNaN(parsed.getTime())) return 'Unknown';
-            return (typeof formatDateForDisplay === 'function') ? formatDateForDisplay(parsed) : parsed.toLocaleDateString('en-GB');
+            return (typeof formatDateForDisplay === 'function') ? formatDateForDisplay(parsed) : formatDateInDDMMYYYY(parsed);
         };
 
         // Registration / enrollment

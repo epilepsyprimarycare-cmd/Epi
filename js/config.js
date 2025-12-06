@@ -13,7 +13,7 @@ const ENVIRONMENT = IS_PRODUCTION ? 'production' : 'development';
 // DEPLOYMENT CONFIGURATION
 // =====================================================
 // UPDATE THIS URL WHEN DEPLOYING TO A NEW GOOGLE APPS SCRIPT:
-const DEPLOYMENT_URL = 'https://script.google.com/macros/s/AKfycbwqKlahDj_4dxnuCXilnW7z4n3HvnAnF3mjM02aKmZN2PR5liDKZOhK4ekJj3Ez_ynM/exec';
+const DEPLOYMENT_URL = 'https://script.google.com/macros/s/AKfycbzVmZaf5wzyheg_Oqmv3wOdGUbRf7Ib6Yf7WKdxfoXUjSYRLXklIq1qK563zCSLtbSZ/exec';
 
 // =====================================================
 // LOGGER UTILITY (controls console output)

@@ -31,12 +31,12 @@ function createSpreadsheetStructure() {
       'CorrectedPhoneNumber', 'FeltImprovement', 'SeizureFrequency', 'SeizureTypeChange',
       'SeizureDurationChange', 'SeizureSeverityChange', 'MedicationSource', 'MissedDose',
       'TreatmentAdherence', 'MedicationChanged', 'NewMedications', 'NewMedicalConditions',
-      'AdditionalQuestions', 'FollowUpDurationSeconds', 'SubmittedBy', 'ReferredToMO',
-      'DrugDoseVerification', 'SubmissionDate', 'NextFollowUpDate', 'ReferralClosed',
-      'UpdateWeightAge', 'CurrentWeight', 'CurrentAge', 'WeightAgeUpdateReason',
-      'WeightAgeUpdateNotes', 'AdverseEffects', 'SignificantEvent', 'DateOfDeath',
-      'CauseOfDeath', 'FollowUpMethod', 'hormonalContraception', 'irregularMenses',
-      'weightGain', 'catamenialPattern', 'Comorbidities'
+      'Comorbidities', 'AdditionalQuestions', 'FollowUpDurationSeconds', 'SubmittedBy',
+      'ReferredToMO', 'DrugDoseVerification', 'SubmissionDate', 'NextFollowUpDate',
+      'ReferralClosed', 'UpdateWeightAge', 'CurrentWeight', 'CurrentAge',
+      'WeightAgeUpdateReason', 'WeightAgeUpdateNotes', 'AdverseEffects', 'SignificantEvent',
+      'DateOfDeath', 'CauseOfDeath', 'FollowUpMethod', 'hormonalContraception',
+      'irregularMenses', 'weightGain', 'catamenialPattern', 'ReferralReason'
     ];
     updateSheetHeaders(sheet, followUpHeaders);
 

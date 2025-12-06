@@ -3607,6 +3607,16 @@ async function openFollowUpModal(patientId) {
         window.Logger.warn('Referral section visibility update failed', err); 
     }
 
+    try {
+        initializeReferralReasonControls();
+        const referralCheckbox = document.getElementById('ReferredToMO') || document.getElementById('referToMO');
+        updateReferralReasonVisibility(referralCheckbox);
+    } catch (err) {
+        window.Logger.warn('Failed to initialize referral reason controls:', err);
+    }
+
+    populateReferralReasonBanner(currentFollowUpPatient);
+
     // Initialize epilepsy type classification UI
     const epilepsyType = currentFollowUpPatient.EpilepsyType;
     const classificationStatus = (!epilepsyType || epilepsyType.toLowerCase() === 'unknown') ? 'unknown' : 'known';
@@ -4161,6 +4171,7 @@ function showClinicalDisclaimer() {
                     opacity: 1;
                     transform: translateY(0) scale(1);
                 }
+                    clearReferralReasonSelection();
             }
         `;
         document.head.appendChild(style);
@@ -4509,7 +4520,141 @@ function wireReferralCheckboxListener(checkbox) {
             cdsSmartDefaultsState.referralAutoApplied = false;
             updateReferralRecommendationHint('');
         }
+        updateReferralReasonVisibility(checkbox);
     });
+    updateReferralReasonVisibility(checkbox);
+}
+
+function isPhcUser() {
+    return (window.currentUserRole || '').toLowerCase() === 'phc';
+}
+
+function getReferralReasonControls() {
+    return {
+        container: document.getElementById('referralReasonContainer'),
+        dropdown: document.getElementById('ReferralReasonDropdown'),
+        hiddenInput: document.getElementById('ReferralReason'),
+        otherGroup: document.getElementById('referralReasonOtherGroup'),
+        otherInput: document.getElementById('ReferralReasonOther')
+    };
+}
+
+function clearReferralReasonSelection() {
+    const { dropdown, hiddenInput, otherGroup, otherInput } = getReferralReasonControls();
+    if (dropdown) dropdown.value = '';
+    if (hiddenInput) hiddenInput.value = '';
+    if (otherInput) otherInput.value = '';
+    if (otherGroup) otherGroup.style.display = 'none';
+}
+
+function syncReferralReasonHiddenValue() {
+    const { dropdown, hiddenInput, otherInput } = getReferralReasonControls();
+    if (!hiddenInput) return;
+    const selection = dropdown ? dropdown.value : '';
+    if (selection === 'other') {
+        const detail = otherInput && otherInput.value ? otherInput.value.trim() : '';
+        hiddenInput.value = detail ? `Other - ${detail}` : '';
+    } else {
+        hiddenInput.value = selection || '';
+    }
+}
+
+function handleReferralReasonDropdownChange() {
+    const { dropdown, otherGroup, otherInput } = getReferralReasonControls();
+    if (!dropdown || !otherGroup) return;
+    if (dropdown.value === 'other') {
+        otherGroup.style.display = 'block';
+        if (otherInput) otherInput.focus();
+    } else {
+        otherGroup.style.display = 'none';
+        if (otherInput) otherInput.value = '';
+    }
+    syncReferralReasonHiddenValue();
+}
+
+function initializeReferralReasonControls() {
+    const { dropdown, otherInput } = getReferralReasonControls();
+    if (dropdown && !dropdown.dataset._referralReasonBound) {
+        dropdown.dataset._referralReasonBound = '1';
+        dropdown.addEventListener('change', handleReferralReasonDropdownChange);
+    }
+    if (otherInput && !otherInput.dataset._referralReasonBound) {
+        otherInput.dataset._referralReasonBound = '1';
+        otherInput.addEventListener('input', syncReferralReasonHiddenValue);
+    }
+    syncReferralReasonHiddenValue();
+}
+
+function updateReferralReasonVisibility(referralCheckbox) {
+    const controls = getReferralReasonControls();
+    if (!controls.container) return;
+    if (!isPhcUser()) {
+        controls.container.style.display = 'none';
+        clearReferralReasonSelection();
+        return;
+    }
+    const shouldShow = !!(referralCheckbox && referralCheckbox.checked);
+    controls.container.style.display = shouldShow ? 'block' : 'none';
+    if (!shouldShow) {
+        clearReferralReasonSelection();
+    } else {
+        syncReferralReasonHiddenValue();
+    }
+}
+
+function getLatestReferralReasonForPatient(patient) {
+    if (!patient) return '';
+    const patientId = normalizePatientId(patient.ID || patient.Id || patient.patientId || patient.id);
+    if (!patientId) return '';
+    const followUps = Array.isArray(window.allFollowUps) ? window.allFollowUps : [];
+    const matching = followUps.filter(fu => {
+        const fuId = normalizePatientId(fu.PatientID || fu.patientId || fu.PatientId);
+        if (fuId !== patientId) return false;
+        if (!isAffirmative(fu.ReferredToMO || fu.referredToMo || fu.ReferredToMo)) return false;
+        return Boolean(fu.ReferralReason || fu.referralReason);
+    });
+    if (matching.length === 0) return '';
+    const parseDateValue = (raw) => {
+        if (!raw) return 0;
+        try {
+            if (typeof parseFlexibleDate === 'function') {
+                const parsed = parseFlexibleDate(raw);
+                return parsed && !isNaN(parsed.getTime()) ? parsed.getTime() : 0;
+            }
+            const d = new Date(raw);
+            return !isNaN(d.getTime()) ? d.getTime() : 0;
+        } catch (e) {
+            return 0;
+        }
+    };
+    matching.sort((a, b) => {
+        const aTime = parseDateValue(a.SubmissionDate || a.FollowUpDate);
+        const bTime = parseDateValue(b.SubmissionDate || b.FollowUpDate);
+        return bTime - aTime;
+    });
+    const latest = matching[0];
+    return latest ? (latest.ReferralReason || latest.referralReason || '') : '';
+}
+
+function populateReferralReasonBanner(patient) {
+    const banner = document.getElementById('referralReasonBanner');
+    const bannerText = document.getElementById('referralReasonBannerText');
+    if (!banner || !bannerText) return;
+    const role = (window.currentUserRole || '').toLowerCase();
+    const isMoRole = role === 'phc_admin' || role === 'master_admin';
+    if (!isMoRole) {
+        banner.style.display = 'none';
+        bannerText.textContent = '';
+        return;
+    }
+    const reason = getLatestReferralReasonForPatient(patient);
+    if (reason) {
+        banner.style.display = 'block';
+        bannerText.textContent = reason;
+    } else {
+        banner.style.display = 'none';
+        bannerText.textContent = '';
+    }
 }
 
 function updateReferralRecommendationHint(message, tone = 'info') {
@@ -6062,6 +6207,20 @@ if (followUpFormEl && !followUpFormEl.dataset._followupHandlerAttached) {
             }
         }
 
+        if (isPhcUser()) {
+            const referralCheckbox = document.getElementById('ReferredToMO');
+            if (referralCheckbox && referralCheckbox.checked) {
+                const reasonInput = document.getElementById('ReferralReason');
+                if (!reasonInput || !reasonInput.value || String(reasonInput.value).trim() === '') {
+                    showToast('error', 'Please select a reason for referring to the Medical Officer.');
+                    if (window.hideLoader) window.hideLoader();
+                    if (followUpDebug) window.Logger.warn('FollowUp submit aborted: referral reason missing for PHC user');
+                    if (followUpDebug) console.groupEnd();
+                    return;
+                }
+            }
+        }
+
         const submissionDebug = { timestamp: new Date().toISOString(), patientId, payload: null, requestBody: null, response: null, error: null };
 
         try {
@@ -6313,6 +6472,17 @@ if (followUpFormEl && !followUpFormEl.dataset._followupHandlerAttached) {
                 }
 
                 submissionDebug.payload = data;
+
+            if (isPhcUser() && isAffirmative(data.ReferredToMO || data.referredToMo || data.referredToMO)) {
+                const reasonVal = (data.ReferralReason || data.referralReason || '').toString().trim();
+                if (!reasonVal) {
+                    showToast('error', 'Please record a referral reason before submitting.');
+                    if (window.hideLoader) window.hideLoader();
+                    if (followUpDebug) window.Logger.warn('FollowUp submit aborted post-serialization: referral reason missing');
+                    if (followUpDebug) console.groupEnd();
+                    return;
+                }
+            }
 
             // Use form-encoded data to avoid CORS preflight issues (same as CDS API)
             const urlEncoded = new URLSearchParams();

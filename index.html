@@ -2061,6 +2061,29 @@
                         Check this box if the patient has not benefited from the current treatment or has severe side
                         effects.
                     </small>
+                    <div id="referralReasonContainer" style="display: none; margin-top: 12px;">
+                        <label for="ReferralReasonDropdown" style="font-weight: 600; display: block; margin-bottom: 6px;">
+                            <i class="fas fa-list" style="margin-right: 6px;"></i>
+                            <span data-i18n-key="followup.referralReason">Reason for Referral</span>
+                        </label>
+                        <select id="ReferralReasonDropdown" class="form-control" style="width: 100%;">
+                            <option value="">Select a reason</option>
+                            <option value="Seizures not controlled">Seizures not controlled</option>
+                            <option value="Experiencing severe side effects">Experiencing severe side effects</option>
+                            <option value="Patient wants referral">Patient wants referral</option>
+                            <option value="Planning pregnancy or is pregnant">Planning pregnancy / is pregnant</option>
+                            <option value="Poor adherence despite counselling">Poor adherence despite counselling</option>
+                            <option value="other">Other (specify)</option>
+                        </select>
+                        <div id="referralReasonOtherGroup" style="display: none; margin-top: 8px;">
+                            <label for="ReferralReasonOther" style="font-size: 0.9em; color: var(--medium-text);">
+                                Please describe the reason
+                            </label>
+                            <input type="text" id="ReferralReasonOther" class="form-control"
+                                placeholder="Type the referral reason" />
+                        </div>
+                        <input type="hidden" id="ReferralReason" name="ReferralReason" value="">
+                    </div>
                 </div>
 
                 <!-- Referral Actions Section (for already-referred patients - visible to MO/Master Admin) -->
@@ -2075,6 +2098,10 @@
                         <small style="color: var(--medium-text);" data-i18n-key="referral.actionsDescription">
                             This patient is currently referred. Choose an action below:
                         </small>
+                    </div>
+                    <div id="referralReasonBanner" style="display:none; margin-bottom: 12px; padding: 12px; border-radius: 6px; background: #fff8e1; border: 1px solid #ffe0b2; color: #8d6e63;">
+                        <strong><i class="fas fa-info-circle" style="margin-right: 6px;"></i>Referral Reason:</strong>
+                        <span id="referralReasonBannerText"></span>
                     </div>
                     <div style="display: flex; gap: 15px; flex-wrap: wrap;">
                         <!-- Refer to Tertiary Care Button -->

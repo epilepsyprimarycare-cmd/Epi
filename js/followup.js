@@ -3610,6 +3610,7 @@ async function openFollowUpModal(patientId) {
     try {
         initializeReferralReasonControls();
         const referralCheckbox = document.getElementById('ReferredToMO') || document.getElementById('referToMO');
+        wireReferralCheckboxListener(referralCheckbox);
         updateReferralReasonVisibility(referralCheckbox);
     } catch (err) {
         window.Logger.warn('Failed to initialize referral reason controls:', err);

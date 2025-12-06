@@ -112,6 +112,148 @@ const DRUG_TITRATION_INSTRUCTIONS = {
   }
 };
 
+const CDS_MECHANISM_REFERENCE = {
+  sodium_channel_blocker: {
+    label: 'Sodium Channel Blocker',
+    drugs: ['carbamazepine', 'phenytoin', 'oxcarbazepine', 'lamotrigine', 'lacosamide', 'eslicarbazepine'],
+    neurotoxicityKeywords: ['ataxia', 'diplopia', 'double vision', 'nystagmus', 'dizziness', 'vertigo']
+  },
+  gaba_agonist: {
+    label: 'GABA Agonist',
+    drugs: ['phenobarbital', 'clobazam', 'diazepam', 'lorazepam', 'benzodiazepine'],
+    neurotoxicityKeywords: ['sedation', 'respiratory depression']
+  },
+  sv2a_modulator: {
+    label: 'SV2A Modulator',
+    drugs: ['levetiracetam', 'brivaracetam'],
+    neurotoxicityKeywords: ['behavioral change', 'irritability']
+  },
+  broad_spectrum: {
+    label: 'Broad Spectrum',
+    drugs: ['valproate', 'valproic', 'topiramate', 'zonisamide'],
+    neurotoxicityKeywords: []
+  }
+};
+
+const CDS_NEUROTOXICITY_KEYWORDS = ['ataxia', 'diplopia', 'double vision', 'nystagmus', 'dizziness', 'vertigo'];
+
+const CDS_ADVERSE_EFFECT_DRUG_MAP = {
+  phenytoin: ['gingival', 'gum', 'hyperplasia', 'hirsutism', 'ataxia', 'diplopia'],
+  carbamazepine: ['rash', 'diplopia', 'ataxia', 'dizziness'],
+  valproate: ['weight gain', 'tremor'],
+  phenobarbital: ['sedation'],
+  clobazam: ['sedation']
+};
+
+const CDS_RATIONAL_NAMED_COMBINATIONS = [
+  {
+    id: 'valproate_ethosuximide',
+    drugs: ['valproate', 'ethosuximide'],
+    text: 'Valproate + Ethosuximide provides synergistic absence seizure control. Monitor standard labs only.',
+    rationale: 'Distinct mechanisms (GABA + T-type calcium) improve absence seizure control without major PK issues.'
+  },
+  {
+    id: 'lamotrigine_topiramate',
+    drugs: ['lamotrigine', 'topiramate'],
+    text: 'Lamotrigine + Topiramate leverage complementary mechanisms. Monitor cognition and hydration.',
+    rationale: 'Different targets (sodium channel vs carbonic anhydrase/glutamate) reduce overlap in toxicity.'
+  }
+];
+
+const CDS_COMPLEX_NAMED_COMBINATIONS = [
+  {
+    id: 'carbamazepine_valproate',
+    drugs: ['carbamazepine', 'valproate'],
+    risk: 'CBZ epoxide accumulation and hepatotoxicity when combined with Valproate.',
+    adjustment: 'Consider reducing Carbamazepine dose by 25%, monitor LFTs/epoxide levels.'
+  },
+  {
+    id: 'valproate_lamotrigine',
+    drugs: ['valproate', 'lamotrigine'],
+    risk: 'High rash risk due to inhibited Lamotrigine clearance.',
+    adjustment: 'Start Lamotrigine at half-dose, titrate no faster than every 2 weeks.'
+  },
+  {
+    id: 'phenytoin_phenobarbital',
+    drugs: ['phenytoin', 'phenobarbital'],
+    risk: 'Profound sedation and auto-induction when Phenytoin and Phenobarbital are combined.',
+    adjustment: 'Reduce total sedative load, monitor levels, and consider staggering titration.'
+  }
+];
+
+function normalizeMedicationName(medication) {
+  if (!medication) return '';
+  const raw = typeof medication === 'string'
+    ? medication
+    : medication.name || medication.genericName || medication.drug || medication.displayName || '';
+  return raw.toString().toLowerCase().trim();
+}
+
+function getMedicationDisplayName(medication) {
+  if (!medication) return '';
+  if (typeof medication === 'string') return medication;
+  return medication.displayName || medication.name || medication.genericName || medication.drug || '';
+}
+
+function detectMechanismsForMedication(medication) {
+  const normalized = normalizeMedicationName(medication);
+  if (!normalized || !CDS_MECHANISM_REFERENCE) return [];
+  const matches = [];
+  Object.entries(CDS_MECHANISM_REFERENCE).forEach(([key, info]) => {
+    if (!info || !Array.isArray(info.drugs)) return;
+    if (info.drugs.some(drug => normalized.includes(drug))) {
+      matches.push(key);
+    }
+  });
+  return matches;
+}
+
+function medicationNamesRoughMatch(a, b) {
+  if (!a || !b) return false;
+  return a === b || a.includes(b) || b.includes(a);
+}
+
+function selectPolytherapyAnchor(medications, doseFindings) {
+  if (!Array.isArray(medications) || medications.length === 0) return '';
+  const normalizedFindings = (doseFindings || []).map(f => ({
+    name: normalizeMedicationName(f?.drug || f?.name || f?.medication || ''),
+    isAtTarget: !!f?.isAtTarget,
+    isAtMax: !!f?.isAtMax,
+    isSubtherapeutic: !!f?.isSubtherapeutic || (Array.isArray(f?.findings) && f.findings.includes('below_target'))
+  }));
+
+  const findMatch = predicate => {
+    return medications.find(med => {
+      const medName = normalizeMedicationName(med);
+      return normalizedFindings.some(f => f.name && medicationNamesRoughMatch(medName, f.name) && predicate(f));
+    });
+  };
+
+  let anchorMed = findMatch(f => f.isAtMax || f.isAtTarget);
+  if (!anchorMed) {
+    anchorMed = medications.find(med => {
+      const medName = normalizeMedicationName(med);
+      return !normalizedFindings.some(f => medicationNamesRoughMatch(medName, f.name) && f.isSubtherapeutic);
+    });
+  }
+  if (!anchorMed) anchorMed = medications[0];
+  return getMedicationDisplayName(anchorMed);
+}
+
+function findMedicationMeta(medMetadata, target) {
+  if (!target) return null;
+  const targetLower = target.toLowerCase();
+  return medMetadata.find(meta => meta.normalized.includes(targetLower));
+}
+
+function buildComboDisplay(drugKeys, medMetadata) {
+  if (!Array.isArray(drugKeys)) return '';
+  return drugKeys.map(key => {
+    const meta = findMedicationMeta(medMetadata, key);
+    return meta?.display || meta?.normalized || key;
+  }).join(' + ');
+}
+
 /**
  * Get titration instructions for a specific drug and age group
  * @param {string} drugName - Name of the drug
@@ -3863,6 +4005,188 @@ function applyPolytherapyPathway(epilepsyType, medications, derived, result, pat
   } catch (err) {
     // Non-critical: if KB lookup fails, do not block evaluation
   }
+
+  const medMetadata = (medications || []).map(med => ({
+    raw: med,
+    display: getMedicationDisplayName(med),
+    normalized: normalizeMedicationName(med),
+    mechanisms: detectMechanismsForMedication(med)
+  }));
+  const comboCache = new Set();
+  const hasMedicationKey = key => !!findMedicationMeta(medMetadata, key);
+  const hasCombo = drugKeys => Array.isArray(drugKeys) && drugKeys.every(key => hasMedicationKey(key));
+  const mechanismUsage = {};
+  medMetadata.forEach(meta => {
+    meta.mechanisms.forEach(mechanismKey => {
+      if (!mechanismUsage[mechanismKey]) mechanismUsage[mechanismKey] = [];
+      mechanismUsage[mechanismKey].push(meta);
+    });
+  });
+
+  const subtherapeuticNames = (result.doseFindings || [])
+    .filter(f => f && (f.isSubtherapeutic || (Array.isArray(f.findings) && f.findings.includes('below_target'))))
+    .map(f => normalizeMedicationName(f.drug || f.name || f.medication || ''));
+  const isMetaSubtherapeutic = meta => subtherapeuticNames.some(name => medicationNamesRoughMatch(name, meta.normalized));
+
+  result.plan = result.plan || {};
+  const anchorDrug = selectPolytherapyAnchor(medications, result.doseFindings);
+  if (anchorDrug) {
+    result.plan.polytherapyAnchor = anchorDrug;
+  }
+
+  Object.entries(mechanismUsage).forEach(([mechanismKey, entries]) => {
+    if (!entries || entries.length < 2) return;
+    const mechanismLabel = CDS_MECHANISM_REFERENCE?.[mechanismKey]?.label || mechanismKey;
+    const medList = entries.map(entry => entry.display || entry.normalized || 'Unknown medication');
+    const subtherCount = entries.filter(entry => isMetaSubtherapeutic(entry)).length;
+
+    if (subtherCount >= 2) {
+      result.warnings.push({
+        id: `pseudo_polytherapy_${mechanismKey}`,
+        severity: 'high',
+        text: `Pseudo-polytherapy detected: ${mechanismLabel} agents (${medList.join(', ')}) remain below therapeutic targets. Optimize a single anchor${anchorDrug ? ' (e.g., ' + anchorDrug + ')' : ''} before adding further mechanisms.`,
+        rationale: 'Stacking low-dose agents from the same mechanism adds toxicity without seizure control.',
+        nextSteps: [
+          'Confirm adherence and serum levels if feasible.',
+          `Titrate one ${mechanismLabel} agent to target and taper redundant options.`,
+          'Reassess seizure control before introducing additional medications.'
+        ],
+        ref: 'pseudo_poly'
+      });
+    } else {
+      const severity = mechanismKey === 'sodium_channel_blocker' ? 'high' : 'medium';
+      result.prompts.push({
+        id: `duplicate_mechanism_${mechanismKey}`,
+        severity: severity,
+        text: `Duplicate ${mechanismLabel} exposure detected (${medList.join(', ')}). Consider consolidating to a single anchor${anchorDrug ? ' (' + anchorDrug + ')' : ''} to limit additive toxicity.`,
+        rationale: 'Overlapping mechanisms rarely provide additive efficacy but increase adverse-effect risk.',
+        nextSteps: [
+          'Document rationale if dual therapy is intentionally maintained.',
+          `If no clear benefit, taper redundant ${mechanismLabel} agents once the anchor is at target dose.`
+        ]
+      });
+    }
+  });
+
+  const levetiracetamMeta = findMedicationMeta(medMetadata, 'levetiracetam');
+  if (levetiracetamMeta && medMetadata.length > 1) {
+    const otherMeds = medMetadata.filter(meta => meta !== levetiracetamMeta).map(meta => meta.display || meta.normalized || 'ASM');
+    result.prompts.push({
+      id: 'combo_levetiracetam_anchor',
+      severity: 'info',
+      text: `Rational combination: Levetiracetam pairs safely with ${otherMeds.join(', ')}. Monitor standard behavioral side effects only.`,
+      rationale: 'Levetiracetam has negligible pharmacokinetic interactions and can anchor most dual therapies.',
+      nextSteps: ['Continue routine mood/behavior monitoring.', 'Escalate Levetiracetam dosing first if additional control needed.']
+    });
+  }
+
+  const clobazamMeta = findMedicationMeta(medMetadata, 'clobazam');
+  if (clobazamMeta && medMetadata.length > 1) {
+    const partners = medMetadata.filter(meta => meta !== clobazamMeta).map(meta => meta.display || meta.normalized || 'ASM');
+    result.prompts.push({
+      id: 'combo_clobazam_adjunct',
+      severity: 'info',
+      text: `Rational combination: Clobazam works as an adjunct with ${partners.join(', ')}. Watch for cumulative sedation.`,
+      rationale: 'Clobazam adds benzodiazepine potentiation without major PK conflicts.',
+      nextSteps: ['Screen for daytime sleepiness or slowed cognition.', 'Taper clobazam slowly if discontinuing.']
+    });
+  }
+
+  CDS_RATIONAL_NAMED_COMBINATIONS.forEach(combo => {
+    if (!combo || comboCache.has(combo.id)) return;
+    if (hasCombo(combo.drugs)) {
+      const label = buildComboDisplay(combo.drugs, medMetadata);
+      result.prompts.push({
+        id: `combo_rational_${combo.id}`,
+        severity: 'info',
+        text: `Rational combination: ${label}. ${combo.text || 'Mechanisms are complementary with minimal PK overlap.'}`,
+        rationale: combo.rationale || 'Different mechanisms lower risk of redundant toxicity.',
+        nextSteps: ['Continue standard monitoring.', 'Document rationale for maintaining this pairing.']
+      });
+      comboCache.add(combo.id);
+    }
+  });
+
+  CDS_COMPLEX_NAMED_COMBINATIONS.forEach(combo => {
+    if (!combo || comboCache.has(combo.id)) return;
+    if (hasCombo(combo.drugs)) {
+      const label = buildComboDisplay(combo.drugs, medMetadata);
+      result.warnings.push({
+        id: `combo_complex_${combo.id}`,
+        severity: 'medium',
+        text: `Interaction alert: ${label}. ${combo.risk}`,
+        rationale: 'Different mechanisms but clinically significant pharmacokinetic interaction.',
+        nextSteps: [combo.adjustment || 'Review dosing protocol for this pairing.', 'Document mitigation steps and monitoring plan.'],
+        ref: 'combo_complex'
+      });
+      comboCache.add(combo.id);
+    }
+  });
+
+  let adverseEffectsList = patientContext?.adverseEffects || [];
+  if (typeof adverseEffectsList === 'string') {
+    adverseEffectsList = adverseEffectsList.split(/[,;]+/);
+  }
+  if (!Array.isArray(adverseEffectsList)) adverseEffectsList = [];
+  const cleanedAdverseEffects = adverseEffectsList
+    .map(effect => (effect || '').toString().trim())
+    .filter(effect => effect.length > 0);
+
+  const matchedNeuroKeywords = [];
+  cleanedAdverseEffects.forEach(effect => {
+    const lower = effect.toLowerCase();
+    CDS_NEUROTOXICITY_KEYWORDS.forEach(keyword => {
+      if (lower.includes(keyword) && !matchedNeuroKeywords.includes(keyword)) {
+        matchedNeuroKeywords.push(keyword);
+      }
+    });
+  });
+
+  if (matchedNeuroKeywords.length > 0 && mechanismUsage.sodium_channel_blocker && mechanismUsage.sodium_channel_blocker.length > 0) {
+    const sodiumNames = mechanismUsage.sodium_channel_blocker.map(entry => entry.display || entry.normalized || 'ASM');
+    result.warnings.push({
+      id: 'sodium_channel_neurotoxicity',
+      severity: 'high',
+      text: `Patient reports neurotoxic symptoms (${matchedNeuroKeywords.join(', ')}) while on sodium-channel blockers ${sodiumNames.join(', ')}. Evaluate for toxicity, simplify the regimen, and prioritize the anchor${anchorDrug ? ' (' + anchorDrug + ')' : ''}.`,
+      rationale: 'Ataxia, diplopia, and related symptoms strongly suggest sodium-channel toxicity when multiple agents are combined.',
+      nextSteps: [
+        'Check serum levels where available.',
+        'Taper or hold redundant sodium-channel blockers.',
+        `Advance only one anchor agent${anchorDrug ? ' (' + anchorDrug + ')' : ''} toward target dosing before reintroducing adjuncts.`
+      ],
+      ref: 'toxicity'
+    });
+  }
+
+  const seenToxicityPairs = new Set();
+  cleanedAdverseEffects.forEach(effect => {
+    const lower = effect.toLowerCase();
+    Object.entries(CDS_ADVERSE_EFFECT_DRUG_MAP || {}).forEach(([drugKey, keywords]) => {
+      if (!Array.isArray(keywords) || keywords.length === 0) return;
+      const matchedKeyword = keywords.find(keyword => lower.includes(keyword));
+      if (!matchedKeyword) return;
+      const matchingMeds = medMetadata.filter(meta => meta.normalized.includes(drugKey));
+      if (matchingMeds.length === 0) return;
+      const medName = matchingMeds[0].display || matchingMeds[0].normalized || drugKey;
+      const pairKey = medName.toLowerCase() + '|' + matchedKeyword.toLowerCase();
+      if (seenToxicityPairs.has(pairKey)) return;
+      seenToxicityPairs.add(pairKey);
+      const medSlug = medName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      const keywordSlug = matchedKeyword.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      result.prompts.push({
+        id: `reported_toxicity_${medSlug}_${keywordSlug}`,
+        severity: 'medium',
+        text: `Patient-reported symptom "${effect}" aligns with known ${medName} toxicity (${matchedKeyword}). Reassess the dose, check serum levels if available, or plan tapering if confirmed.`,
+        rationale: 'Mapping symptoms to the offending drug prevents ongoing toxicity and clarifies remediation steps.',
+        nextSteps: [
+          'Confirm onset relative to dose adjustments.',
+          'Obtain drug levels or focused labs where feasible.',
+          `If toxicity is likely, reduce or discontinue ${medName} and lean on the designated anchor${anchorDrug ? ' (' + anchorDrug + ')' : ''}.`
+        ],
+        ref: 'toxicity_map'
+      });
+    });
+  });
 
   // Check for excessive polytherapy
   if (derived.asmCount > 2) {

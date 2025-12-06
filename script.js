@@ -343,12 +343,26 @@ window.renderPatientTimeline = function(patient, followUps) {
             const referredToMO = isAffirmative(f.ReferredToMO || f.referToMO || f.referredToMO);
             const referredToTertiary = isAffirmative(f.ReferredToTertiary || f.referToTertiary || f.referredToTertiary);
             if (referredToMO) {
+                let referralContext = f.AdditionalQuestions || f.additionalQuestions || f.ReferralNotes || f.referralNotes || f.ReferralReason || f.referralReason || '';
+                if (Array.isArray(referralContext)) {
+                    referralContext = referralContext.join(', ');
+                } else if (typeof referralContext === 'object' && referralContext !== null) {
+                    try {
+                        referralContext = JSON.stringify(referralContext);
+                    } catch (e) {
+                        referralContext = '';
+                    }
+                }
+                referralContext = typeof referralContext === 'string' ? referralContext : '';
+                const referralDetails = referralContext.trim().length > 0
+                    ? escapeHtml(referralContext.substring(0, 100))
+                    : 'Patient referred for specialist review';
                 events.push({ 
                     date, 
                     type: 'referral', 
                     icon: '🔄',
                     title: 'Referred to Medical Officer', 
-                    details: f.AdditionalQuestions ? escapeHtml(f.AdditionalQuestions.substring(0, 100)) : 'Patient referred for specialist review',
+                    details: referralDetails,
                     subDetails: ''
                 });
             }
@@ -4869,7 +4883,8 @@ function renderFollowUpTrendChart() {
     const sortedMonths = Object.keys(monthlyFollowUps).sort();
     const chartLabels = sortedMonths.map(month => {
         const dateObj = new Date(`${month}-01T00:00:00`);
-        return (typeof formatDateForDisplay === 'function') ? formatDateForDisplay(dateObj) : formatDateInDDMMYYYY(dateObj);
+        const monthName = dateObj.toLocaleString('en-US', { month: 'short' });
+        return `${monthName} ${dateObj.getFullYear()}`;
     });
     const chartData = sortedMonths.map(month => monthlyFollowUps[month]);
 

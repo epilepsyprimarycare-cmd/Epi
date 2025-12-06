@@ -5268,7 +5268,7 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
         const isReferredToMOCard = latestFollowUpRecord
             ? (wasPreviouslyReferred && !referralClosedByMO)
             : statusSaysReferred;
-        const isReturnedFromReferral = referralClosedByMO || (!statusSaysReferred && wasPreviouslyReferred);
+        const isReturnedFromReferral = referralClosedByMO;
         const isDueForCurrentMonth = isReturnedFromReferral ? checkIfDueForCurrentMonth(patient) : false;
         const referralDate = latestFollowUpRecord ? (latestFollowUpRecord.ReferralDate || latestFollowUpRecord.FollowUpDate || latestFollowUpRecord.SubmissionDate) : null;
         const medicationsFromMO = (isReturnedFromReferral && Array.isArray(patient.Medications) && patient.Medications.length > 0) ? patient.Medications : null;

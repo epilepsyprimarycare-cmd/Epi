@@ -44,6 +44,7 @@
   "followup.completedForMonth": "Follow-up completed for {{month}} {{year}}",
   "followup.nextFollowupDate": "Next follow-up date: {{date}}",
   "followup.dueForNewMonth": "Follow-up due for new month",
+  "followup.awaitingMedicalOfficer": "Awaiting Medical Officer follow-up",
   "message.selectPHCToViewPatients": "Please select a facility from the dropdown above to view patients requiring follow-up.",
   "message.noPermissionFollowupData": "You don't have permission to access follow-up data.",
   "cdss.notice": "Notice:",

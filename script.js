@@ -3353,88 +3353,19 @@ function renderStats() {
     const overdueFollowUps = filteredPatients.filter(p => {
         const lastFollowUpDate = getPatientLastFollowUpDate(p);
         if (!lastFollowUpDate) return false;
-        
+
         const nextDueDate = new Date(lastFollowUpDate);
         nextDueDate.setMonth(nextDueDate.getMonth() + 1);
-        
-        // Patient is overdue if next due date is in the past
-        const isOverdue = new Date() > nextDueDate;
-        if (!isOverdue) return false;
-        
-        // Check if follow-up status indicates completion for THIS month
-        const statusLower = (p.FollowUpStatus || '').toLowerCase();
-        
-        // If status is explicitly "Pending", they're overdue
-        if (statusLower === 'pending') return true;
-        
-        // If status contains "completed for", check if it's for the current month
-        if (statusLower.includes('completed')) {
-            // Extract month from "Completed for November 2025" format
-            const monthMatch = (p.FollowUpStatus || '').match(/Completed for (\w+) (\d{4})/i);
-            if (monthMatch) {
-                const completedMonthName = monthMatch[1];
-                const completedYear = parseInt(monthMatch[2]);
-                const currentDate = new Date();
-                const currentMonth = currentDate.getMonth();
-                const currentYear = currentDate.getFullYear();
-                const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                                   'July', 'August', 'September', 'October', 'November', 'December'];
-                const completedMonth = monthNames.findIndex(m => m.toLowerCase() === completedMonthName.toLowerCase());
-                
-                // If completed for current month, not overdue
-                if (completedYear === currentYear && completedMonth === currentMonth) {
-                    return false;
-                }
-                // If completed for a past month but still marked as completed (reset didn't run), they ARE overdue
-                return true;
-            }
-            // If just "Completed" without month, assume it's current month
-            return false;
-        }
-        
-        // For any other status, they're overdue if their due date is past
-        return true;
+        return new Date() > nextDueDate;
     }).length;
 
     const dueThisWeek = filteredPatients.filter(p => {
         const lastFollowUpDate = getPatientLastFollowUpDate(p);
         if (!lastFollowUpDate) return false;
-        
+
         const nextDueDate = new Date(lastFollowUpDate);
         nextDueDate.setMonth(nextDueDate.getMonth() + 1);
-        
-        // Check if this falls within the current week
-        if (nextDueDate < startOfWeek || nextDueDate > endOfWeek) return false;
-        
-        // Check if follow-up status indicates completion for THIS month
-        const statusLower = (p.FollowUpStatus || '').toLowerCase();
-        
-        // If status is explicitly "Pending", they're due
-        if (statusLower === 'pending') return true;
-        
-        // If status contains "completed for", check if it's for the current month
-        if (statusLower.includes('completed')) {
-            const monthMatch = (p.FollowUpStatus || '').match(/Completed for (\w+) (\d{4})/i);
-            if (monthMatch) {
-                const completedMonthName = monthMatch[1];
-                const completedYear = parseInt(monthMatch[2]);
-                const currentDate = new Date();
-                const currentMonth = currentDate.getMonth();
-                const currentYear = currentDate.getFullYear();
-                const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                                   'July', 'August', 'September', 'October', 'November', 'December'];
-                const completedMonth = monthNames.findIndex(m => m.toLowerCase() === completedMonthName.toLowerCase());
-                
-                // If completed for current month, not due
-                if (completedYear === currentYear && completedMonth === currentMonth) {
-                    return false;
-                }
-                return true;
-            }
-            return false;
-        }
-        
-        return true;
+        return nextDueDate >= startOfWeek && nextDueDate <= endOfWeek;
     }).length;
 
     const totalActive = filteredPatients.length;

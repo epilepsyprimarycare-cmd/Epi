@@ -1572,17 +1572,13 @@ class SeizureClassificationTool {
                 const isUnknown = simple.summaryOnset === 'Unknown' || (classification && (classification.type && classification.type.toLowerCase().includes('unclassified')));
                 if (diagEl) {
                     if (isPNES) {
-                        // If PNES/FDS suspected, confirm clinician consent to apply this diagnosis
-                        const pn = confirm('This classification suggests a functional/dissociative seizure (FDS/PNES). Specialist review is recommended before applying this diagnosis. Do you want to apply this classification?');
-                        if (!pn) {
-                            showNotification(window.EpicareI18n ? window.EpicareI18n.translate('seizureClassifier.applyCanceled.suspectedFds') : 'Apply-to-form canceled: clinician deferred due to suspected FDS', 'warning');
-                            try { if (typeof window.logUserActivity === 'function') window.logUserActivity('Seizure Classifier: Apply to form canceled (PNES/FDS)', { patientId: window.currentPatientId || null, mode: this.mode }); } catch (e) {}
-                            return;
-                        }
+                        // Apply FDS diagnosis directly (user already confirmed by clicking "Use this Classification")
                         diagEl.value = 'FDS';
                         diagEl.dispatchEvent(new Event('change'));
                         // When FDS selected, ensure epilepsy type is set to Unknown for safety
                         if (targetField) { targetField.value = 'Unknown'; targetField.dispatchEvent(new Event('change')); }
+                        // Show informational message
+                        showNotification(window.EpicareI18n ? window.EpicareI18n.translate('seizureClassifier.fdsApplied') : 'FDS diagnosis applied. Specialist review is recommended for functional/dissociative seizures.', 'info');
                     } else if (isUnknown) {
                         diagEl.value = 'Uncertain';
                         diagEl.dispatchEvent(new Event('change'));

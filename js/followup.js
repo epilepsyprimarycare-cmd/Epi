@@ -13,6 +13,8 @@
 
 // AAM Sorting state
 let currentAAMSortMode = 'off'; // 'off', 'asc', 'desc'
+let currentAAMFilter = null; // null = show all, or specific AAM center name to filter
+let availableAAMCenters = []; // List of unique AAM centers in current view
 
 /**
  * Unified Clinical Decision Support System
@@ -4856,7 +4858,7 @@ function promptForReferralReason(referralType = 'mo') {
     return new Promise((resolve) => {
         const typeLabel = referralType === 'tertiary' ? 'Tertiary Care Center' : 'Medical Officer';
         const modal = document.createElement('div');
-        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
+        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:20015;';
         const content = document.createElement('div');
         content.style.cssText = 'background:white;padding:20px;border-radius:8px;max-width:500px;width:90%;';
         content.innerHTML = `
@@ -5604,6 +5606,24 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
         );
     }
 
+    // Collect unique AAM centers from filtered patients for toggle functionality
+    const aamSet = new Set();
+    filteredPatients.forEach(p => {
+        const aam = resolveNearestAAMName(p);
+        if (aam && aam.trim()) {
+            aamSet.add(aam.trim());
+        }
+    });
+    availableAAMCenters = Array.from(aamSet).sort();
+
+    // Apply AAM filtering if a specific AAM is selected
+    if (currentAAMFilter) {
+        filteredPatients = filteredPatients.filter(p => {
+            const aam = resolveNearestAAMName(p);
+            return aam && aam.trim() === currentAAMFilter;
+        });
+    }
+
     // Debug: log counts to help trace why list may be empty
     try { 
         window.Logger.debug('renderFollowUpPatientList', { 
@@ -5629,27 +5649,33 @@ function renderFollowUpPatientList(phc, searchTerm = "") {
         return;
     }
 
-    // Show sort controls when patients are available
+    // Show AAM controls when patients are available
     const sortControls = document.getElementById('aamSortControls');
     if (sortControls) sortControls.style.display = 'block';
 
-    // Apply completion-first ordering, then optional AAM sorting, finally fallback to patient name
+    // Update AAM button display to show current filter state
+    const aamBtn = document.getElementById('aamSortBtn');
+    if (aamBtn && availableAAMCenters.length > 0) {
+        if (currentAAMFilter) {
+            const displayName = currentAAMFilter.length > 20 ? currentAAMFilter.substring(0, 20) + '...' : currentAAMFilter;
+            aamBtn.innerHTML = `<i class="fas fa-filter"></i> ${displayName}`;
+            aamBtn.title = currentAAMFilter;
+        } else {
+            aamBtn.innerHTML = '<i class="fas fa-filter"></i> All AAMs';
+            aamBtn.title = 'Click to filter by AAM center';
+        }
+        aamBtn.disabled = false;
+    } else if (aamBtn) {
+        aamBtn.innerHTML = '<i class="fas fa-filter"></i> No AAMs';
+        aamBtn.disabled = true;
+    }
+
+    // Apply completion-first ordering, then sort by patient name
     const patientsForFollowUp = [...filteredPatients].sort((a, b) => {
         const aCompleted = isFollowUpCompleted(a);
         const bCompleted = isFollowUpCompleted(b);
         if (aCompleted !== bCompleted) {
             return aCompleted ? 1 : -1;
-        }
-
-        if (currentAAMSortMode !== 'off') {
-            const aAam = normalizeAamValueForSort(resolveNearestAAMName(a));
-            const bAam = normalizeAamValueForSort(resolveNearestAAMName(b));
-            if (aAam !== bAam) {
-                if (aAam === null) return currentAAMSortMode === 'asc' ? 1 : -1;
-                if (bAam === null) return currentAAMSortMode === 'asc' ? -1 : 1;
-                if (aAam < bAam) return currentAAMSortMode === 'asc' ? -1 : 1;
-                if (aAam > bAam) return currentAAMSortMode === 'asc' ? 1 : -1;
-            }
         }
 
         const aName = (a.PatientName || a.Name || '').toString().toLowerCase();
@@ -8142,24 +8168,38 @@ window.updateStreamlinedCDSDisplay = updateStreamlinedCDSDisplay;
 // Auto-initialize on page load
 initializeMobileFollowUpForm();
 
-// AAM Sort Button Handler
+// AAM Toggle Button Handler - Cycles through AAM centers to filter cards
 document.addEventListener('DOMContentLoaded', function() {
     const aamSortBtn = document.getElementById('aamSortBtn');
     if (aamSortBtn) {
         aamSortBtn.addEventListener('click', function() {
-            // Cycle through sort modes: off -> asc -> desc -> off
-            if (currentAAMSortMode === 'off') {
-                currentAAMSortMode = 'asc';
-                this.innerHTML = '<i class="fas fa-sort-alpha-down"></i> AAM: A→Z';
-            } else if (currentAAMSortMode === 'asc') {
-                currentAAMSortMode = 'desc';
-                this.innerHTML = '<i class="fas fa-sort-alpha-up"></i> AAM: Z→A';
+            // Cycle through available AAM centers: All -> AAM1 -> AAM2 -> ... -> All
+            if (!currentAAMFilter) {
+                // Currently showing all, switch to first AAM center
+                if (availableAAMCenters.length > 0) {
+                    currentAAMFilter = availableAAMCenters[0];
+                    const displayName = currentAAMFilter.length > 20 ? currentAAMFilter.substring(0, 20) + '...' : currentAAMFilter;
+                    this.innerHTML = `<i class="fas fa-filter"></i> ${displayName}`;
+                    this.title = currentAAMFilter;
+                }
             } else {
-                currentAAMSortMode = 'off';
-                this.innerHTML = '<i class="fas fa-sort"></i> AAM: Off';
+                // Currently showing a specific AAM, move to next one
+                const currentIndex = availableAAMCenters.indexOf(currentAAMFilter);
+                if (currentIndex < availableAAMCenters.length - 1) {
+                    // Move to next AAM center
+                    currentAAMFilter = availableAAMCenters[currentIndex + 1];
+                    const displayName = currentAAMFilter.length > 20 ? currentAAMFilter.substring(0, 20) + '...' : currentAAMFilter;
+                    this.innerHTML = `<i class="fas fa-filter"></i> ${displayName}`;
+                    this.title = currentAAMFilter;
+                } else {
+                    // Reached end of list, go back to showing all
+                    currentAAMFilter = null;
+                    this.innerHTML = '<i class="fas fa-filter"></i> All AAMs';
+                    this.title = 'Click to filter by AAM center';
+                }
             }
             
-            // Re-render the follow-up list with new sorting
+            // Re-render the follow-up list with new AAM filter
             const phcSelect = document.getElementById('phcFollowUpSelect');
             const selectedPhc = phcSelect ? phcSelect.value : null;
             const searchInput = document.getElementById('followUpPatientSearch');

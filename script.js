@@ -3776,11 +3776,31 @@ function updateKPIGauges() {
 
     const totalActive = activePatients.length;
     
-    // CRITICAL FIX: Follow-up rate should reflect actual completion vs due/overdue
-    // Calculate patients who were DUE for follow-up this month (completed OR overdue)
+    // CRITICAL FIX: Calculate follow-up rate from actual follow-up records, not patient status
+    // This matches the data shown in the Monthly Follow-up Trends chart
     const currentMonth = new Date().getMonth();
     const currentYear = new Date().getFullYear();
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                       'July', 'August', 'September', 'October', 'November', 'December'];
     
+    // Count actual follow-ups completed this month from followUpsData
+    const patientIdStrings = activePatients.map(p => String(p.ID || p.PatientID || p.id));
+    const followUpsThisMonth = (Array.isArray(followUpsData) ? followUpsData : []).filter(f => {
+        // Check if follow-up belongs to an active patient
+        const fPatientId = String(f.PatientID || f.patientId || f.PatientId || '');
+        if (!patientIdStrings.includes(fPatientId)) return false;
+        
+        // Check if follow-up was done in current month
+        const rawDate = f.FollowUpDate || f.followUpDate || f.SubmissionDate || f.submissionDate;
+        if (!rawDate) return false;
+        
+        const d = (typeof parseDateFlexible === 'function') ? parseDateFlexible(rawDate) : new Date(rawDate);
+        if (!d || isNaN(d.getTime())) return false;
+        
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    }).length;
+    
+    // Calculate patients who were DUE for follow-up this month
     const patientsDueThisMonth = activePatients.filter(p => {
         const lastFollowUpDate = getPatientLastFollowUpDate(p);
         if (!lastFollowUpDate) return true; // Never had follow-up, so due
@@ -3790,36 +3810,16 @@ function updateKPIGauges() {
         
         // Due this month if next due date is in current month OR earlier (overdue)
         return nextDueDate.getMonth() <= currentMonth && nextDueDate.getFullYear() <= currentYear;
-    });
-    
-    // Count completed this month from those who were due
-    const completedThisMonth = patientsDueThisMonth.filter(p => {
-        const status = (p.FollowUpStatus || '').toString();
-        if (!status.includes('Completed')) return false;
-        
-        // Check if completed for current month specifically
-        const monthMatch = status.match(/Completed for (\w+) (\d{4})/i);
-        if (monthMatch) {
-            const completedMonthName = monthMatch[1];
-            const completedYear = parseInt(monthMatch[2]);
-            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                               'July', 'August', 'September', 'October', 'November', 'December'];
-            const completedMonth = monthNames.findIndex(m => m.toLowerCase() === completedMonthName.toLowerCase());
-            return completedYear === currentYear && completedMonth === currentMonth;
-        }
-        // Generic "Completed" - assume current month
-        return true;
     }).length;
     
-    // Follow-up rate = completed this month / (completed + overdue + due this week)
-    // This gives a true picture: if 375 are overdue, rate should be LOW
-    const patientsNeedingAttention = completedThisMonth + overdueFollowUps + dueThisWeek;
-    const followUpRate = patientsNeedingAttention > 0 
-        ? Math.round((completedThisMonth / patientsNeedingAttention) * 100) 
+    // Follow-up rate = actual follow-ups completed this month / patients due this month
+    const followUpRate = patientsDueThisMonth > 0 
+        ? Math.round((followUpsThisMonth / patientsDueThisMonth) * 100) 
         : 0;
     
-    window.Logger.debug('[Follow-up Rate] Due this month:', patientsDueThisMonth.length);
-    window.Logger.debug('[Follow-up Rate] Completed this month:', completedThisMonth);
+    window.Logger.debug('[Follow-up Rate] Active patients:', activePatients.length);
+    window.Logger.debug('[Follow-up Rate] Patients due this month:', patientsDueThisMonth);
+    window.Logger.debug('[Follow-up Rate] Actual follow-ups completed this month:', followUpsThisMonth);
     window.Logger.debug('[Follow-up Rate] Overdue:', overdueFollowUps);
     window.Logger.debug('[Follow-up Rate] Due this week:', dueThisWeek);
     window.Logger.debug('[Follow-up Rate] Final rate:', followUpRate + '%');

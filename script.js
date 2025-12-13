@@ -3825,8 +3825,7 @@ function updateKPIGauges() {
     window.Logger.debug('[Follow-up Rate] Final rate:', followUpRate + '%');
 
     // Calculate treatment adherence from real follow-up data
-    // Use string comparison for patient IDs to handle type mismatches
-    const patientIdStrings = activePatients.map(p => String(p.ID || p.PatientID || p.id));
+    // Use string comparison for patient IDs to handle type mismatches (reuse patientIdStrings from above)
     const relevantFollowUps = (Array.isArray(followUpsData) ? followUpsData : []).filter(f => {
         const fPatientId = String(f.PatientID || f.patientId || f.PatientId || '');
         return patientIdStrings.includes(fPatientId);

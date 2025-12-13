@@ -438,9 +438,17 @@ const NotificationManager = (function() {
     // Initialize notification system
     async function init() {
         window.Logger.debug('Initializing notification system...');
+        
+        // Check if VAPID key is loaded
+        if (!VAPID_PUBLIC_KEY) {
+            window.Logger.error('[Notifications] VAPID_PUBLIC_KEY is not configured. Check API_CONFIG.');
+            safeNotify('Push notifications are not configured', 'warning');
+            return;
+        }
+        
         if ('serviceWorker' in navigator && 'PushManager' in window) {
             try {
-                const registration = await navigator.serviceWorker.register('./sw.js');
+                const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
                 window.Logger.debug('[ServiceWorker] Registration successful with scope: ', registration.scope);
                 
                 // Wait for the service worker to be ready
@@ -459,12 +467,33 @@ const NotificationManager = (function() {
     // Request permission and subscribe the user
     async function requestAndSubscribe(registration) {
         try {
-            const permission = await Notification.requestPermission();
-            if (permission === 'granted') {
-                window.Logger.debug('[Notifications] Permission granted.');
+            // Check current permission state
+            const currentPermission = Notification.permission;
+            window.Logger.debug('[Notifications] Current permission state:', currentPermission);
+            
+            if (currentPermission === 'granted') {
+                window.Logger.debug('[Notifications] Permission already granted, subscribing...');
                 await subscribeUserToPush(registration);
+                return;
+            }
+            
+            if (currentPermission === 'denied') {
+                window.Logger.warn('[Notifications] Permission was previously denied by user');
+                safeNotify(window.EpicareI18n ? window.EpicareI18n.translate('notification.permissionDenied') : 'Notification permission was denied. Please enable in browser settings.', 'warning');
+                return;
+            }
+            
+            // Request permission (only if 'default' state)
+            window.Logger.debug('[Notifications] Requesting permission...');
+            const permission = await Notification.requestPermission();
+            window.Logger.debug('[Notifications] Permission result:', permission);
+            
+            if (permission === 'granted') {
+                window.Logger.debug('[Notifications] Permission granted, subscribing...');
+                await subscribeUserToPush(registration);
+                safeNotify('Push notifications enabled successfully', 'success');
             } else {
-                window.Logger.debug('[Notifications] Permission denied.');
+                window.Logger.warn('[Notifications] Permission denied by user');
                 safeNotify(window.EpicareI18n ? window.EpicareI18n.translate('notification.permissionDenied') : 'Notification permission was denied', 'warning');
             }
         } catch (error) {
@@ -478,28 +507,39 @@ const NotificationManager = (function() {
         try {
             if (!VAPID_PUBLIC_KEY) {
                 window.Logger.error('VAPID Public Key is missing. Cannot subscribe to push notifications.');
+                safeNotify('Push notification configuration error', 'error');
                 return;
             }
 
+            window.Logger.debug('[Notifications] Checking existing subscription...');
             // Check if already subscribed
             let subscription = await registration.pushManager.getSubscription();
 
             if (!subscription) {
+                window.Logger.debug('[Notifications] No existing subscription, creating new one...');
+                window.Logger.debug('[Notifications] Using VAPID key:', VAPID_PUBLIC_KEY.substring(0, 20) + '...');
+                
                 subscription = await registration.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
                 });
-                window.Logger.debug('[ServiceWorker] New push subscription created: ', subscription);
+                window.Logger.debug('[ServiceWorker] New push subscription created');
+                window.Logger.debug('[ServiceWorker] Subscription endpoint:', subscription.endpoint);
             } else {
-                window.Logger.debug('[ServiceWorker] Using existing push subscription: ', subscription);
+                window.Logger.debug('[ServiceWorker] Using existing push subscription');
+                window.Logger.debug('[ServiceWorker] Subscription endpoint:', subscription.endpoint);
             }
             
             await sendSubscriptionToServer(subscription);
         } catch (err) {
             if (Notification.permission === 'denied') {
                 window.Logger.warn('Permission for notifications was denied');
+                safeNotify('Notification permission denied', 'warning');
             } else {
-                window.Logger.error('[ServiceWorker] Failed to subscribe to push: ', err);
+                window.Logger.error('[ServiceWorker] Failed to subscribe to push:', err);
+                window.Logger.error('[ServiceWorker] Error name:', err.name);
+                window.Logger.error('[ServiceWorker] Error message:', err.message);
+                safeNotify('Failed to subscribe to push notifications: ' + err.message, 'error');
             }
         }
     }
@@ -507,6 +547,12 @@ const NotificationManager = (function() {
     async function sendSubscriptionToServer(subscription) {
         // Allow subscription if user has a PHC OR is a master_admin
         const role = (window.currentUserRole || '').toLowerCase();
+        window.Logger.debug('[Notifications] Sending subscription to server...', {
+            role: role,
+            phc: window.currentUserPHC,
+            username: window.currentUserName
+        });
+        
         if (!window.currentUserPHC && role !== 'master_admin') {
             // This is expected for roles without PHC (except master_admin). Change to an info log to reduce noise.
             window.Logger.info("User does not have a specific PHC assigned and is not master_admin. Skipping push subscription.");
@@ -537,6 +583,9 @@ const NotificationManager = (function() {
                 }
             }
 
+            window.Logger.debug('[Notifications] Sending to:', window.API_CONFIG.NOTIFICATIONS_SCRIPT_URL);
+            window.Logger.debug('[Notifications] Payload:', payload.toString());
+            
             const response = await fetch(window.API_CONFIG.NOTIFICATIONS_SCRIPT_URL, {
                 method: 'POST',
                 headers: {
@@ -545,13 +594,20 @@ const NotificationManager = (function() {
                 body: payload.toString()
             });
             
+            window.Logger.debug('[Notifications] Server response status:', response.status);
+            
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                const errorText = await response.text();
+                window.Logger.error('[Notifications] Server error response:', errorText);
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
             }
             
             const responseData = await response.json();
             
+            window.Logger.info('[Notifications] Subscription sent to server successfully:', responseData);
+            
             if (responseData.status === 'success') {
+                window.Logger.info('[Notifications] Push notifications are now active for user:', window.currentUserName);
                 // Only show success toast if it's a new subscription or explicit action
                 // safeNotify(window.EpicareI18n ? window.EpicareI18n.translate('notification.subscribeSuccess') : 'Successfully subscribed to notifications!', 'success');
                 window.Logger.debug('Successfully subscribed to notifications on server.');
@@ -588,7 +644,54 @@ const NotificationManager = (function() {
     }
 
     return {
-        init: init
+        init: init,
+        // Expose for testing
+        testNotifications: async function() {
+            window.Logger.info('[Notifications] Testing push notification system...');
+            
+            // Check browser support
+            if (!('serviceWorker' in navigator)) {
+                window.Logger.error('[Test] Service Worker not supported');
+                safeNotify('Service Worker not supported in this browser', 'error');
+                return;
+            }
+            
+            if (!('PushManager' in window)) {
+                window.Logger.error('[Test] Push API not supported');
+                safeNotify('Push API not supported in this browser', 'error');
+                return;
+            }
+            
+            // Check permission
+            window.Logger.info('[Test] Current permission:', Notification.permission);
+            
+            // Check if service worker is registered
+            const registration = await navigator.serviceWorker.getRegistration();
+            if (!registration) {
+                window.Logger.error('[Test] No service worker registered');
+                safeNotify('Service worker not registered. Try refreshing the page.', 'error');
+                return;
+            }
+            
+            window.Logger.info('[Test] Service worker found, scope:', registration.scope);
+            
+            // Check subscription
+            const subscription = await registration.pushManager.getSubscription();
+            if (!subscription) {
+                window.Logger.warn('[Test] No push subscription found');
+                safeNotify('Not subscribed to push. Attempting to subscribe...', 'info');
+                await requestAndSubscribe(registration);
+            } else {
+                window.Logger.info('[Test] Subscription found:', subscription.endpoint);
+                safeNotify('Push notifications are configured correctly!', 'success');
+            }
+        },
+        
+        // Expose for manual reinitialization
+        reinit: async function() {
+            window.Logger.info('[Notifications] Manually reinitializing...');
+            await init();
+        }
     };
 })();
 
@@ -1101,5 +1204,8 @@ document.addEventListener('DOMContentLoaded', () => {
         NotificationManager.init();
     });
 });
+
+// Expose NotificationManager for testing
+window.NotificationManager = NotificationManager;
 
 window.Logger.debug('Comprehensive utilities loaded: basic functions, notifications, pagination, and print summary');

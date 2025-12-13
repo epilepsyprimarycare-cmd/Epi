@@ -448,7 +448,10 @@ const NotificationManager = (function() {
         
         if ('serviceWorker' in navigator && 'PushManager' in window) {
             try {
-                const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+                // Use relative path to work with GitHub Pages subpaths
+                // This resolves to the same directory as the current page
+                const swPath = new URL('./sw.js', window.location.href).pathname;
+                const registration = await navigator.serviceWorker.register(swPath);
                 window.Logger.debug('[ServiceWorker] Registration successful with scope: ', registration.scope);
                 
                 // Wait for the service worker to be ready

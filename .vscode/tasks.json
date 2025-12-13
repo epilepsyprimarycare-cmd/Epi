@@ -1,0 +1,17 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start Simple HTTP Server for Epicare",
+			"type": "shell",
+			"command": "cd c:\\Users\\Mayank\\Documents\\Epi && python -m http.server 8080",
+			"isBackground": true
+		},
+		{
+			"label": "Start HTTP Server",
+			"type": "shell",
+			"command": "cd 'c:\\Users\\Mayank\\Documents\\Epi'; python -m http.server 8080",
+			"isBackground": true
+		}
+	]
+}

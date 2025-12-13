@@ -574,7 +574,7 @@ window.downloadAllPatientsCsv = async function() {
                 FatherName: patient.FatherName || '',
                 Age: patient.Age || '',
                 Gender: patient.Gender || '',
-                Phone: patient.Phone || '',
+                Phone: (patient.Phone || '').slice(0, -4) + '####',
                 PHC: patient.PHC || '',
                 Diagnosis: patient.Diagnosis || '',
                 SeizureFrequency: patient.SeizureFrequency || '',

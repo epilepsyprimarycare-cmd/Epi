@@ -2589,8 +2589,13 @@ function runWeeklyHighRiskScanAndNotify() {
                   endpoint: maskEndpoint(endpointUrl)
                 });
                 const payload = JSON.stringify({ title: 'High-Risk Patients', body: message, data: { phc: phcLabel, count: cases.length } });
-                sendPushNotification(endpointUrl, payload);
-                phcPushCount++;
+                const result = sendPushNotification(endpointUrl, payload);
+                if (result && result.success) {
+                  phcPushCount++;
+                } else if (result && result.shouldDelete) {
+                  console.log('Marking invalid subscription as inactive (403/410)');
+                  markSubscriptionInactive(endpointUrl);
+                }
               }
             } catch (e) {
               console.error('Failed to send push to subscription', e);
@@ -2620,8 +2625,13 @@ function runWeeklyHighRiskScanAndNotify() {
                   totalHighRisk
                 });
                 const payload = JSON.stringify({ title: 'High-Risk Summary', body: summaryMessage, data: { count: totalHighRisk } });
-                sendPushNotification(endpointUrl, payload);
-                masterPushCount++;
+                const result = sendPushNotification(endpointUrl, payload);
+                if (result && result.success) {
+                  masterPushCount++;
+                } else if (result && result.shouldDelete) {
+                  console.log('Marking invalid master admin subscription as inactive (403/410)');
+                  markSubscriptionInactive(endpointUrl);
+                }
               }
            } catch (e) {
               console.error('Failed to send push to master admin', e);
@@ -2721,18 +2731,31 @@ function sendPushNotification(endpoint, payload) {
       const status = response.getResponseCode();
       if (status === 201 || status === 202) {
         console.log('Push delivered successfully. Status:', status);
-      } else if (status === 411) {
-        console.log('Subscription expired (411) for endpoint:', endpoint);
+        return { success: true, status: status };
+      } else if (status === 410 || status === 404) {
+        console.log('Subscription expired/not found (410/404) for endpoint:', maskEndpoint(endpoint));
+        return { success: false, shouldDelete: true, status: status, endpoint: endpoint };
+      } else if (status === 403) {
+        const responseText = safeGetContentText(response);
+        console.error('Push delivery failed (403 - Invalid VAPID credentials)', {
+          status: status,
+          endpoint: maskEndpoint(endpoint),
+          response: responseText
+        });
+        // 403 means VAPID key mismatch - this subscription should be removed
+        return { success: false, shouldDelete: true, status: status, endpoint: endpoint };
       } else {
         const responseText = safeGetContentText(response);
         console.error('Push delivery failed', {
           status: status,
-          endpoint: endpoint,
+          endpoint: maskEndpoint(endpoint),
           response: responseText
         });
+        return { success: false, shouldDelete: false, status: status };
       }
     } catch (e) {
       console.error('Error sending push notification:', e);
+      return { success: false, shouldDelete: false, error: e.message };
     }
 }
 
@@ -2743,6 +2766,33 @@ function sendPushNotification(endpoint, payload) {
       return '[unavailable]';
     }
   }
+
+/**
+ * Helper to mark invalid subscriptions as inactive
+ */
+function markSubscriptionInactive(endpoint) {
+  try {
+    const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(PUSH_SUBSCRIPTIONS_SHEET_NAME);
+    if (!sheet) return;
+    
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const endpointCol = headers.indexOf('Endpoint');
+    const statusCol = headers.indexOf('Status');
+    
+    if (endpointCol === -1 || statusCol === -1) return;
+    
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][endpointCol] === endpoint) {
+        sheet.getRange(i + 1, statusCol + 1).setValue('Inactive');
+        console.log('Marked subscription as inactive:', maskEndpoint(endpoint));
+        break;
+      }
+    }
+  } catch (e) {
+    console.error('Failed to mark subscription inactive:', e);
+  }
+}
 
 /**
  * Normalize patient object fields for client consumption.

@@ -1,0 +1,2445 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <!-- Content Security Policy: restrict sources, allow necessary CDNs and inline scripts/styles only where required -->
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; img-src 'self' data: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; media-src 'self' blob:; script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://apis.google.com 'unsafe-inline'; style-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; font-src 'self' https://cdnjs.cloudflare.com; connect-src 'self' https://script.google.com https://*.googleapis.com https://*.gstatic.com https:;">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Epicare</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="stylesheet" href="style.css">
+    <!-- Performance: preconnect to CDNs used -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+    <link rel="dns-prefetch" href="//cdn.jsdelivr.net">
+    <link rel="dns-prefetch" href="//cdnjs.cloudflare.com">
+    <!-- Preload critical hero font icons and styles -->
+    <link rel="preload" href="style.css" as="style">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Defer heavy chart libs to after paint for faster TTI -->
+    <!-- Load critical config and utils first for login screen -->
+    <script src="js/config.js"></script>
+    <script src="js/globals.js"></script>
+    <script src="js/date-utils.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/offline-sync.js"></script>
+    <script src="js/i18n.js"></script>
+    <!-- Defer non-critical modules until after initial render -->
+    <script defer src="js/validation.js"></script>
+    <script defer src="js/injury-map.js"></script>
+    <script defer src="js/seizure-classifier.js"></script>
+    <script defer src="js/seizure-video-upload.js"></script>
+    <script defer src="js/teleconsultation.js"></script>
+    <script defer src="https://apis.google.com/js/api.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
+    <!-- chartjs-gauge removed (incompatible with Chart.js v3). Add a compatible gauge plugin if needed -->
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+
+</head>
+
+<body>
+    <!-- Global Offline Indicator -->
+    <div id="global-offline-banner" style="display: none; position: fixed; top: 0; left: 0; right: 0; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%); color: white; padding: 12px 20px; z-index: 999999; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.2); font-weight: 500; font-size: 14px;">
+        <i class="fas fa-wifi" style="margin-right: 8px; opacity: 0.3; text-decoration: line-through;"></i>
+        <span>You are currently offline. Some features may be limited. Changes will sync when connection is restored.</span>
+        <button onclick="window.triggerOfflineSync && window.triggerOfflineSync()" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 4px 12px; border-radius: 4px; margin-left: 12px; cursor: pointer; font-size: 12px;">
+            <i class="fas fa-sync"></i> Retry Sync
+        </button>
+    </div>
+    
+    <div class="loading-indicator" id="loadingIndicator" style="z-index: 100000;">
+        <div class="spinner"></div>
+        <span id="loadingText" data-i18n-key="message.loading">Loading...</span>
+    </div>
+
+    <div id="loginScreen" class="login-container">
+        <div class="system-header">
+            <i class="fas fa-brain"></i>
+            <h1 data-i18n-key="app.title">Epilepsy Management System</h1>
+            <p data-i18n-key="app.subtitle">Comprehensive Patient Tracking & Monitoring</p>
+            <div style="position:absolute; top:10px; right:20px;">
+                <label for="languageSwitcher" style="font-weight:600; margin-right:6px;"
+                    data-i18n-key="label.language">Language</label>
+                <select id="languageSwitcher">
+                    <option value="en" data-i18n-key="language.english">English</option>
+                    <option value="hi" data-i18n-key="language.hindi">Hindi</option>
+                    <option value="bn" data-i18n-key="language.bengali">Bengali</option>
+                    <option value="ta" data-i18n-key="language.tamil">Tamil</option>
+                    <option value="kn" data-i18n-key="language.kannada">Kannada</option>
+                    <option value="ml" data-i18n-key="language.malayalam">Malayalam</option>
+                    <option value="mr" data-i18n-key="language.marathi">Marathi</option>
+                    <option value="pa" data-i18n-key="language.punjabi">Punjabi</option>
+                    <option value="te" data-i18n-key="language.telugu">Telugu</option>
+                </select>
+                <script>
+                    document.addEventListener('DOMContentLoaded', function () {
+                        var langSwitcher = document.getElementById('languageSwitcher');
+                        if (langSwitcher) {
+                            langSwitcher.addEventListener('change', function () {
+                                if (window.EpicareI18n && typeof window.EpicareI18n.loadLanguage === 'function') {
+                                    window.EpicareI18n.loadLanguage(langSwitcher.value);
+                                }
+                            });
+                        }
+                    });
+                </script>
+            </div>
+        </div>
+
+        <div class="login-card">
+            <div class="login-logo">
+                <h2 data-i18n-key="login.title">Secure Login</h2>
+                <p data-i18n-key="login.subtitle">Access the epilepsy management system</p>
+            </div>
+
+            <form class="login-form" id="loginForm">
+                <div class="form-group">
+                    <label for="username">
+                        <div class="label-line">
+                            <i class="fas fa-user"></i>
+                            <span data-i18n-key="label.username">Username</span>
+                        </div>
+                    </label>
+                    <input type="text" id="username" placeholder="Enter your username" autocomplete="username" required>
+                    <div class="error-message" id="usernameError" data-i18n-key="login.error.username">Please enter a
+                        valid username</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">
+                        <div class="label-line">
+                            <i class="fas fa-lock"></i>
+                            <span data-i18n-key="label.password">Password</span>
+                        </div>
+                    </label>
+                    <input type="password" id="password" placeholder="Enter your password"
+                        autocomplete="current-password" required>
+                    <div class="error-message" id="passwordError" data-i18n-key="login.error.password">Incorrect
+                        credentials</div>
+                </div>
+
+                <div>
+                    <h3><i class="fas fa-user-tag"></i> <span data-i18n-key="label.selectRole">Select Your Role</span>
+                    </h3>
+                    <div class="role-selector">
+                        <div class="role-option active" data-role="admin" tabindex="0" role="button"
+                            aria-label="Administrator role">
+                            <i class="fas fa-user-shield"></i>
+                            <div class="role-name" data-i18n-key="label.admin">Administrator</div>
+                            <div class="role-desc" data-i18n-key="login.role.adminDesc">Full or facility-specific access
+                                based on your account</div>
+                        </div>
+                        <div class="role-option" data-role="phc" tabindex="0" role="button"
+                            aria-label="Facility Staff role">
+                            <i class="fas fa-clinic-medical"></i>
+                            <div class="role-name" data-i18n-key="label.phc">Facility Staff</div>
+                            <div class="role-desc" data-i18n-key="login.role.phcDesc">Facility-specific access</div>
+                        </div>
+                        <div class="role-option" data-role="viewer" tabindex="0" role="button" aria-label="Viewer role">
+                            <i class="fas fa-chart-bar"></i>
+                            <div class="role-name" data-i18n-key="label.viewer">Viewer</div>
+                            <div class="role-desc" data-i18n-key="login.role.viewerDesc">De-identified data</div>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary" data-requires-online="true">
+                    <i class="fas fa-sign-in-alt"></i> <span data-i18n-key="button.login">Login</span>
+                </button>
+            </form>
+
+            <div class="security-notice">
+                <h3 data-i18n-key="security.notice.title"><i class="fas fa-shield-alt"></i> Security Notice</h3>
+                <p data-i18n-key="security.notice.body">All access is logged and monitored. Patient privacy is protected
+                    through role-based data access controls.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="dashboardScreen" class="dashboard-container">
+        <div class="header">
+            <h1 data-i18n-key="app.title">Epilepsy Management System</h1>
+            <p data-i18n-key="app.subtitle">Comprehensive Patient Tracking & Monitoring</p>
+            <div id="welcomeMessage" style="margin-top: 10px; font-style: italic;"></div>
+            <div class="logout-container">
+                <div class="user-info">
+                    <i class="fas fa-user-circle"></i> <span id="currentUserName"></span> (<span
+                        id="currentUserRole"></span>)
+                </div>
+                <button class="logout-btn" id="logoutBtn" aria-label="label.logout"
+                    onclick="if(typeof window.logout==='function'){window.logout();}else{location.reload();}">
+                    <i class="fas fa-sign-out-alt"></i> <span data-i18n-key="label.logout">Logout</span>
+                </button>
+            </div>
+        </div>
+
+        <nav class="nav-tabs" aria-label="Dashboard Navigation">
+            <button class="nav-tab active" data-tab="dashboard" aria-selected="true">
+                <i class="fas fa-tachometer-alt"></i> <span data-i18n-key="nav.dashboard">Dashboard</span>
+            </button>
+            <button class="nav-tab" data-tab="patients" id="patientsTab" aria-selected="false">
+                <i class="fas fa-user-injured"></i> <span data-i18n-key="nav.patients">Patient List</span>
+            </button>
+            <button class="nav-tab" data-tab="reports" id="reportsTab" aria-selected="false">
+                <i class="fas fa-chart-bar"></i> <span data-i18n-key="nav.reports">Reports</span>
+            </button>
+            <button class="nav-tab" data-tab="add-patient" id="addPatientTab" aria-selected="false">
+                <i class="fas fa-user-plus"></i> <span data-i18n-key="nav.addPatient">Add Patient</span>
+            </button>
+            <button class="nav-tab" data-tab="follow-up" id="followUpTab" aria-selected="false" title="Follow-up">
+                <i class="fas fa-calendar-check"></i> <span data-i18n-key="nav.followup">Follow-up</span>
+            </button>
+            <button class="nav-tab" data-tab="management" id="managementTab" aria-selected="false">
+                <i class="fas fa-cogs"></i> <span data-i18n-key="nav.management">Management</span>
+            </button>
+            <button class="nav-tab" data-tab="referred" id="referredTab" aria-selected="false" style="display:none;"
+                title="Referred Patients">
+                <i class="fas fa-user-md"></i> <span data-i18n-key="nav.referred">Referred</span>
+            </button>
+            <button class="nav-tab" data-tab="stock" id="stockTab" aria-selected="false" style="display:none;"
+                title="Stock Management">
+                <i class="fas fa-boxes-stacked"></i> <span data-i18n-key="nav.stock">Stock</span>
+            </button>
+        </nav>
+
+        <main class="tab-content">
+            <section id="dashboard" class="tab-pane">
+                <!-- Critical Alerts Section -->
+                <div id="criticalAlertsSection" class="chart-box"
+                    style="border-left: 5px solid var(--danger-color); background-color: #fff5f5; margin-bottom: 2rem;">
+                    <div class="collapsible-header" id="criticalAlertsHeader"
+                        style="cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+                        <h3 style="color: var(--danger-color); margin: 0;">
+                            <i class="fas fa-exclamation-triangle"></i> <span
+                                data-i18n-key="dashboard.criticalAlerts">Critical Alerts</span>
+                            <span id="criticalAlertsCount" class="badge"
+                                style="background-color: var(--danger-color); color: white; border-radius: 10px; padding: 2px 8px; font-size: 0.8em; margin-left: 8px;">0</span>
+                        </h3>
+                        <i class="fas fa-chevron-down" id="criticalAlertsToggle"
+                            style="transition: transform 0.3s ease;"></i>
+                    </div>
+                    <div id="criticalAlertsContent"
+                        style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out;">
+                        <ul id="criticalAlertsList" style="list-style-type: none; padding-left: 0; margin-top: 1rem;">
+                        </ul>
+                    </div>
+                </div>
+                <!-- Facility Filter -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2><i class="fas fa-tachometer-alt"></i> <span data-i18n-key="dashboard.overview">Dashboard
+                            Overview</span></h2>
+                    <div>
+                        <select id="dashboardPhcFilter"
+                            style="padding: 0.5rem; font-size: 1rem; border-radius: var(--border-radius); border: 2px solid #e0e0e0; min-width: 200px;">
+                            <option value="All" data-i18n-key="dashboard.allFacilities">All Facilities</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Stats Grid -->
+                <div class="stats-grid" id="statsGrid">
+                </div>
+
+                <!-- KPI Gauges -->
+                <div class="chart-row">
+                    <div class="chart-box" style="flex: 1; margin-right: 1rem;">
+                        <h3><i class="fas fa-tasks"></i> <span data-i18n-key="dashboard.monthlyFollowup">Monthly
+                                Follow-up Rate</span></h3>
+                        <div style="width: 100%; height: 200px; position: relative;">
+                            <canvas id="followUpRateGauge"></canvas>
+                        </div>
+                        <div class="kpi-footer"
+                            style="text-align: center; margin-top: 10px; color: #666; font-size: 0.9em;">
+                            <span data-i18n-key="dashboard.target">Target: 90%</span> | <span
+                                id="followUpRateTrend"></span>
+                        </div>
+                    </div>
+                    <div class="chart-box" style="flex: 1; margin-left: 1rem;">
+                        <h3><i class="fas fa-pills"></i> <span data-i18n-key="dashboard.treatmentAdherence">Treatment
+                                Adherence</span></h3>
+                        <div style="width: 100%; height: 200px; position: relative;">
+                            <canvas id="adherenceGauge"></canvas>
+                        </div>
+                        <div class="kpi-footer"
+                            style="text-align: center; margin-top: 10px; color: #666; font-size: 0.9em;">
+                            <span data-i18n-key="dashboard.last30days">Based on last 30 days</span> | <span
+                                id="adherenceTrend"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+
+                    <div class="chart-box kpi-cards-container" style="display: flex; gap: 1rem; justify-content: space-between; align-items: stretch;">
+                        <div class="kpi-card" id="kpi-risk-stratification">
+                            <div class="kpi-label">Risk Stratification</div>
+                            <div class="kpi-value" id="kpiMissedDosesValue">--</div>
+                            <div class="risk-bar-container" style="width: 100%; height: 40px; margin-top: 12px; background: #f0f0f0; border-radius: 8px; overflow: hidden; display: flex;">
+                                <div class="risk-high" style="background: #dc3545; color: white; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 600; transition: width 0.3s ease;" data-value="0">
+                                    <span class="risk-label"></span>
+                                </div>
+                                <div class="risk-medium" style="background: #ffc107; color: #333; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 600; transition: width 0.3s ease;" data-value="0">
+                                    <span class="risk-label"></span>
+                                </div>
+                                <div class="risk-low" style="background: #28a745; color: white; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 600; transition: width 0.3s ease;" data-value="0">
+                                    <span class="risk-label"></span>
+                                </div>
+                            </div>
+                            <div class="kpi-desc" style="font-size: 0.8rem; margin-top: 8px; display: flex; justify-content: space-around;">
+                                <span><span style="display: inline-block; width: 10px; height: 10px; background: #dc3545; border-radius: 50%; margin-right: 4px;"></span>High Risk</span>
+                                <span><span style="display: inline-block; width: 10px; height: 10px; background: #ffc107; border-radius: 50%; margin-right: 4px;"></span>Medium Risk</span>
+                                <span><span style="display: inline-block; width: 10px; height: 10px; background: #28a745; border-radius: 50%; margin-right: 4px;"></span>Low Risk</span>
+                            </div>
+                        </div>
+                        <div class="kpi-card" id="kpi-new-diagnoses">
+                            <div class="kpi-label">New Diagnoses</div>
+                            <div class="kpi-value" id="kpiNewDiagnosesValue">--</div>
+                            <div class="kpi-desc">New epilepsy diagnoses this month</div>
+                        </div>
+                        <div class="kpi-card" id="kpi-lost-followup">
+                            <div class="kpi-label">Lost to Follow-Up</div>
+                            <div class="kpi-value" id="kpiLostFollowUpValue">--</div>
+                            <div class="kpi-desc">No follow-up in 6+ months (excl. inactive)</div>
+                        </div>
+                    </div>
+
+                    <div class="chart-box">
+                        <h3><i class="fas fa-chart-line"></i> <span data-i18n-key="dashboard.monthlyTrends">Monthly
+                                Follow-up Trends</span></h3>
+                        <div style="margin-bottom: 1rem;">
+                            <select id="followUpTrendPhcFilter"
+                                style="padding: 0.5rem; font-size: 1rem; border-radius: var(--border-radius); border: 2px solid #e0e0e0;">
+                                <option value="All" data-i18n-key="dropdown.allFacilities">All Facilities</option>
+                            </select>
+                        </div>
+                        <canvas id="trendChart" height="250" aria-label="Monthly follow-up trends chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="chart-box" style="margin-top: 30px;" id="recentActivitiesContainer">
+                    <h3><i class="fas fa-list"></i> <span data-i18n-key="dashboard.recentActivities">Recent Follow-up
+                            Activities</span></h3>
+                    <div id="recentActivities">
+                    </div>
+                </div>
+            </section>
+
+            <section id="patients" class="tab-pane" style="display:none;">
+                <div class="export-container" id="exportContainer" style="display: none;">
+                    <button class="btn btn-success" id="exportCsvBtnPatients" aria-label="button.exportCsv"
+                        data-i18n-key="button.exportCsv" data-requires-online="true" onclick="window.downloadAllPatientsCsv && window.downloadAllPatientsCsv()">
+                        <i class="fas fa-file-export"></i> <span data-i18n-key="button.exportCsv">Export to CSV</span>
+                    </button>
+                </div>
+                <div class="search-container">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="patientSearch" placeholder="Search patients by name, facility, or ID..."
+                        data-i18n-key="patients.search" data-i18n-attr="placeholder" aria-label="patients.search">
+                </div>
+                <div style="margin: 15px 0; display: flex; align-items: center; gap: 10px;">
+                    <label
+                        style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.9rem; color: var(--medium-text);">
+                        <input type="checkbox" id="showInactivePatients"
+                            onchange="renderPatientList(document.getElementById('patientSearch').value)">
+                        <i class="fas fa-user-times"></i>
+                        <span data-i18n-key="patients.showInactive">Show Inactive Patients</span>
+                    </label>
+                    <span style="font-size: 0.8rem; color: var(--light-text);" data-i18n-key="patients.inactiveNote">
+                        (Inactive patients are excluded from dashboard calculations)
+                    </span>
+                </div>
+                <div id="patientList" class="patient-list">
+                </div>
+            </section>
+
+            <section id="reports" class="tab-pane" style="display:none;">
+                <div class="chart-container">
+                    <div class="chart-box">
+                        <h3><i class="fas fa-map-marker-alt"></i> <span
+                                data-i18n-key="reports.facilityDistribution">Facility Patient Distribution</span></h3>
+                        <canvas id="areaChart" height="300" aria-label="Facility patient distribution chart"></canvas>
+                    </div>
+
+                    <div class="chart-box">
+                        <h3><i class="fas fa-pills"></i> <span data-i18n-key="reports.medicationUsage">Medication
+                                Usage</span></h3>
+                        <canvas id="medicationChart" height="300" aria-label="Medication usage chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <div class="chart-box">
+                        <h3><i class="fas fa-home"></i> <span data-i18n-key="reports.residenceDistribution">Residence
+                                Type Distribution</span></h3>
+                        <canvas id="residenceChart" height="300"
+                            aria-label="Residence type distribution chart"></canvas>
+                    </div>
+
+                    <div class="chart-box">
+                        <h3><i class="fas fa-chart-bar"></i> <span
+                                data-i18n-key="reports.monthlyFacilityFollowups">Monthly Facility Follow-ups (Completed
+                                vs Left)</span></h3>
+                        <canvas id="seizureChart" height="260" aria-label="Monthly facility follow-ups chart"></canvas>
+                    </div>
+                </div>
+
+
+                <div class="chart-box" style="margin-top: 30px;" id="procurementReportContainer">
+                    <h3><i class="fas fa-truck"></i> <span data-i18n-key="reports.procurementForecast">Medication
+                            Procurement Forecast</span></h3>
+                    <div style="margin-bottom: 1rem;">
+                        <select id="procurementPhcFilter"
+                            style="padding: 0.5rem; font-size: 1rem; border-radius: var(--border-radius); border: 2px solid #e0e0e0;">
+                            <option value="All">All Facilities</option>
+                        </select>
+                    </div>
+                    <div id="procurementReport"></div>
+                </div>
+
+                <div class="chart-box" style="margin-top: 30px;">
+                    <h3><i class="fas fa-user-md"></i> <span data-i18n-key="reports.referralMetrics">Referral &
+                            Escalation Metrics</span></h3>
+                    <div id="referralMetrics"></div>
+                </div>
+
+
+
+                <div class="chart-box" style="margin-top: 30px;" id="treatmentSummaryContainer">
+                    <h3><i class="fas fa-table"></i> <span data-i18n-key="reports.treatmentSummary">Treatment Status
+                            Summary Table</span></h3>
+                    <div style="margin-bottom: 1rem;">
+                        <select id="treatmentSummaryPhcFilter"
+                            style="padding: 0.5rem; font-size: 1rem; border-radius: var(--border-radius); border: 2px solid #e0e0e0;">
+                            <option value="All">All Facilities</option>
+                        </select>
+                    </div>
+                    <div id="treatmentSummaryTable"></div>
+                </div>
+
+                <div style="margin-top: 30px; display: flex; justify-content: flex-end;">
+                    <button class="btn btn-primary" id="openAdvancedAnalyticsBtn"
+                        data-i18n-key="analytics.viewAdvanced">
+                        <i class="fas fa-chart-pie"></i> <span data-i18n-key="analytics.viewAdvanced">View Advanced
+                            Analytics</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Advanced Analytics Modal -->
+            <div id="advancedAnalyticsModal" class="modal"
+                style="display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 2000;">
+                <div class="modal-content"
+                    style="width: min(1200px, 95vw); max-height: 90vh; overflow: auto; background: #fff; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
+                    <div class="modal-header"
+                        style="display:flex; align-items:center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #eee; position: sticky; top: 0; background: #fff; z-index: 1;">
+                        <h3 style="margin:0; display:flex; align-items:center; gap:8px;"><i
+                                class="fas fa-chart-pie"></i> <span data-i18n-key="analytics.advancedTitle">Advanced
+                                Clinical Analytics</span></h3>
+                        <button class="modal-close" id="advancedAnalyticsClose" aria-label="Close"
+                            style="border:none; background:transparent; font-size: 1.25rem; cursor:pointer;"><i
+                                class="fas fa-times"></i></button>
+                    </div>
+                    <div class="modal-body" style="padding: 16px 20px;">
+                        <!-- Filters Section -->
+                        <div class="analytics-filters"
+                            style="display:flex; gap:12px; align-items:center; flex-wrap: wrap; margin-bottom: 20px; padding: 16px; background: #f8f9fa; border-radius: 8px;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <label for="advancedPhcFilter"
+                                    style="margin:0; color: var(--medium-text); font-weight: 600;"><i
+                                        class="fas fa-clinic-medical"></i> <span
+                                        data-i18n-key="analytics.phc">Facility:</span></label>
+                                <select id="advancedPhcFilter" class="form-control" style="min-width: 200px;">
+                                    <option value="All" data-i18n-key="analytics.allPhcs">All Facilities</option>
+                                </select>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <label for="analyticsStartDate"
+                                    style="margin:0; color: var(--medium-text); font-weight: 600;"><i
+                                        class="fas fa-calendar-alt"></i> <span
+                                        data-i18n-key="analytics.from">From:</span></label>
+                                <input type="date" id="analyticsStartDate" class="form-control"
+                                    style="min-width: 150px;">
+                            </div>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <label for="analyticsEndDate"
+                                    style="margin:0; color: var(--medium-text); font-weight: 600;"><span
+                                        data-i18n-key="analytics.to">To:</span></label>
+                                <input type="date" id="analyticsEndDate" class="form-control" style="min-width: 150px;">
+                            </div>
+                            <div style="display:flex; gap:8px; margin-left: auto;">
+                                <button class="btn btn-sm btn-outline-primary" onclick="exportAnalyticsCSV()">
+                                    <i class="fas fa-download"></i> Export CSV
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Charts Grid -->
+                        <div class="analytics-grid"
+                            style="display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px;">
+                            <!-- Seizure Frequency Chart -->
+                            <div class="chart-box"
+                                style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                    <h4 style="margin:0; display:flex; align-items:center; gap:8px;"><i
+                                            class="fas fa-brain" style="color: #3b82f6;"></i> Seizure Frequency Trends
+                                    </h4>
+                                    <button class="btn btn-sm btn-outline-secondary"
+                                        onclick="exportChartAsImage('seizureFrequency', 'seizure-frequency-chart')">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                </div>
+                                <div style="height: 300px; position: relative;">
+                                    <canvas id="seizureFrequencyChart"></canvas>
+                                </div>
+                            </div>
+
+                            <!-- Medication Adherence Chart -->
+                            <div class="chart-box"
+                                style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                    <h4 style="margin:0; display:flex; align-items:center; gap:8px;"><i
+                                            class="fas fa-pills" style="color: #10b981;"></i> Medication Adherence</h4>
+                                    <button class="btn btn-sm btn-outline-secondary"
+                                        onclick="exportChartAsImage('medicationAdherence', 'medication-adherence-chart')">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                </div>
+                                <div style="height: 300px; position: relative;">
+                                    <canvas id="medicationAdherenceChart"></canvas>
+                                </div>
+                            </div>
+
+                            <!-- Referral Analytics Chart -->
+                            <div class="chart-box"
+                                style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                    <h4 style="margin:0; display:flex; align-items:center; gap:8px;"><i
+                                            class="fas fa-share-alt" style="color: #f59e0b;"></i> Referral Trends</h4>
+                                    <button class="btn btn-sm btn-outline-secondary"
+                                        onclick="exportChartAsImage('referralAnalytics', 'referral-analytics-chart')">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                </div>
+                                <div style="height: 300px; position: relative;">
+                                    <canvas id="referralAnalyticsChart"></canvas>
+                                </div>
+                            </div>
+
+                            <!-- Patient Outcomes Chart -->
+                            <div class="chart-box"
+                                style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                    <h4 style="margin:0; display:flex; align-items:center; gap:8px;"><i
+                                            class="fas fa-heartbeat" style="color: #ef4444;"></i> Patient Outcomes</h4>
+                                    <button class="btn btn-sm btn-outline-secondary"
+                                        onclick="exportChartAsImage('patientOutcomes', 'patient-outcomes-chart')">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                </div>
+                                <div style="height: 300px; position: relative;">
+                                    <canvas id="patientOutcomesChart"></canvas>
+                                </div>
+                            </div>
+
+                            <!-- Patient Status Distribution Chart -->
+                            <div class="chart-box"
+                                style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                    <h4 style="margin:0; display:flex; align-items:center; gap:8px;"><i
+                                            class="fas fa-doughnut" style="color: #3b82f6;"></i> Patient Status
+                                        Distribution</h4>
+                                    <button class="btn btn-sm btn-outline-secondary"
+                                        onclick="exportChartAsImage('patientStatusAnalytics', 'patient-status-chart')">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                </div>
+                                <div style="height: 300px; position: relative;">
+                                    <canvas id="patientStatusAnalyticsChart"></canvas>
+                                </div>
+                            </div>
+
+                            <!-- Age Distribution Histogram -->
+                            <div class="chart-box"
+                                style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                    <h4 style="margin:0; display:flex; align-items:center; gap:8px;"><i
+                                            class="fas fa-chart-bar" style="color: #10b981;"></i> Age Distribution</h4>
+                                    <button class="btn btn-sm btn-outline-secondary"
+                                        onclick="exportChartAsImage('ageDistribution', 'age-distribution-chart')">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                </div>
+                                <div style="height: 300px; position: relative;">
+                                    <canvas id="ageDistributionChart"></canvas>
+                                </div>
+                            </div>
+
+                            <!-- Age of Onset Distribution Histogram -->
+                            <div class="chart-box"
+                                style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                    <h4 style="margin:0; display:flex; align-items:center; gap:8px;"><i
+                                            class="fas fa-chart-bar" style="color: #f59e0b;"></i> Age of Onset
+                                        Distribution</h4>
+                                    <button class="btn btn-sm btn-outline-secondary"
+                                        onclick="exportChartAsImage('ageOfOnsetDistribution', 'age-of-onset-chart')">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                </div>
+                                <div style="height: 300px; position: relative;">
+                                    <canvas id="ageOfOnsetDistributionChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Follow-Up Status by Block Table -->
+                        <div class="chart-box"
+                            style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-top: 20px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                <h4 style="margin:0; display:flex; align-items:center; gap:8px;">
+                                    <i class="fas fa-table" style="color: #8b5cf6;"></i> 
+                                    <span>Epilepsy Patient Follow-Up Status by Block</span>
+                                    <span id="followUpTableDateRange" style="font-size: 0.85rem; color: #666; font-weight: normal;"></span>
+                                </h4>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="exportFollowUpStatusTableCSV()">
+                                    <i class="fas fa-download"></i> Export
+                                </button>
+                            </div>
+                            <div style="overflow-x: auto; max-height: 600px; overflow-y: auto;">
+                                <table id="followUpStatusTable" style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                                    <thead style="position: sticky; top: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; z-index: 10;">
+                                        <tr>
+                                            <th style="padding: 12px 8px; text-align: left; border: 1px solid #ddd;">Rank</th>
+                                            <th style="padding: 12px 8px; text-align: left; border: 1px solid #ddd;">Name of Block</th>
+                                            <th style="padding: 12px 8px; text-align: center; border: 1px solid #ddd;">No. of Patients</th>
+                                            <th style="padding: 12px 8px; text-align: center; border: 1px solid #ddd;">No. of Follow-ups</th>
+                                            <th style="padding: 12px 8px; text-align: center; border: 1px solid #ddd;">%</th>
+                                            <th style="padding: 12px 8px; text-align: center; border: 1px solid #ddd;">Gap</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="followUpStatusTableBody">
+                                        <tr>
+                                            <td colspan="6" style="padding: 20px; text-align: center; color: #999;">
+                                                <i class="fas fa-spinner fa-spin"></i> Loading data...
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                    <tfoot style="background: #f8f9fa; font-weight: bold; border-top: 3px solid #667eea;">
+                                        <tr>
+                                            <td colspan="2" style="padding: 12px 8px; text-align: left; border: 1px solid #ddd;">Total</td>
+                                            <td id="followUpTotalPatients" style="padding: 12px 8px; text-align: center; border: 1px solid #ddd;">-</td>
+                                            <td id="followUpTotalFollowups" style="padding: 12px 8px; text-align: center; border: 1px solid #ddd;">-</td>
+                                            <td id="followUpTotalPercentage" style="padding: 12px 8px; text-align: center; border: 1px solid #ddd;">-</td>
+                                            <td id="followUpTotalGap" style="padding: 12px 8px; text-align: center; border: 1px solid #ddd;">-</td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Summary Statistics -->
+                        <div class="analytics-summary"
+                            style="margin-top: 24px; padding: 16px; background: #f8f9fa; border-radius: 8px;">
+                            <h5 style="margin: 0 0 12px 0; color: var(--medium-text);"><i
+                                    class="fas fa-info-circle"></i> Analytics Summary</h5>
+                            <div id="analyticsSummary" style="color: var(--medium-text); font-size: 0.9rem;">
+                                Loading summary statistics...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <section id="add-patient" class="tab-pane" style="display:none;">
+                <div class="chart-box">
+                    <h3><i class="fas fa-user-plus"></i> <span data-i18n-key="label.addPatient">Add New Patient</span>
+                    </h3>
+                    <form id="patientForm" class="form-grid" style="margin-top: 20px;">
+                        <input type="hidden" id="draftId" name="draftId" value="">
+                        <div id="draftIndicator"
+                            style="display:none; color:#d35400; font-weight:bold; margin-bottom:10px;"></div>
+                        <h3 class="form-section-header"><span data-i18n-key="form.patientInfo">Patient
+                                Information</span></h3>
+                        <div class="form-group">
+                            <label for="patientName">
+                                <div class="label-line">
+                                    <i class="fas fa-user"></i>
+                                    <span data-i18n-key="label.patientName">Patient Name *</span>
+                                </div>
+                            </label>
+                            <input type="text" id="patientName" name="patientName" placeholder="Full name"
+                                data-i18n-key="form.patientNamePlaceholder" data-i18n-attr="placeholder" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="fatherName">
+                                <div class="label-line">
+                                    <i class="fas fa-user-friends"></i>
+                                    <span data-i18n-key="label.fatherName">Father's Name</span>
+                                </div>
+                            </label>
+                            <input type="text" id="fatherName" name="fatherName" placeholder="Father's name"
+                                data-i18n-key="label.fatherNamePlaceholder" data-i18n-attr="placeholder" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="patientAge">
+                                <div class="label-line">
+                                    <i class="fas fa-birthday-cake"></i>
+                                    <span data-i18n-key="label.age">Age *</span>
+                                </div>
+                            </label>
+                            <input type="number" id="patientAge" name="patientAge" placeholder="Age"
+                                data-i18n-key="label.agePlaceholder" data-i18n-attr="placeholder" required min="1"
+                                max="99">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="patientGender">
+                                <div class="label-line">
+                                    <i class="fas fa-venus-mars"></i>
+                                    <span data-i18n-key="label.gender">Gender *</span>
+                                </div>
+                            </label>
+                            <select id="patientGender" name="patientGender" required>
+                                <option value="" data-i18n-key="label.selectGender">Select Gender</option>
+                                <option value="Male" data-i18n-key="gender.male">Male</option>
+                                <option value="Female" data-i18n-key="gender.female">Female</option>
+                                <option value="Other" data-i18n-key="gender.other">Other</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="patientPhone">
+                                <div class="label-line">
+                                    <i class="fas fa-phone"></i>
+                                    <span data-i18n-key="label.phoneRequired">Phone Number *</span>
+                                </div>
+                            </label>
+                            <input type="tel" id="patientPhone" name="patientPhone" placeholder="10-digit phone number"
+                                data-i18n-key="label.phonePlaceholder" data-i18n-attr="placeholder" required
+                                pattern="\d{10}" title="Phone number must be exactly 10 digits.">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="phoneBelongsTo">
+                                <div class="label-line">
+                                    <i class="fas fa-mobile-alt"></i>
+                                    <span data-i18n-key="label.phoneBelongsTo">Phone Belongs To</span>
+                                </div>
+                            </label>
+                            <select id="phoneBelongsTo" name="phoneBelongsTo">
+                                <option value="Patient" data-i18n-key="phoneBelongsTo.patient">Patient</option>
+                                <option value="Relative" data-i18n-key="phoneBelongsTo.relative">Relative</option>
+                                <option value="Neighbour" data-i18n-key="phoneBelongsTo.neighbour">Neighbour</option>
+                                <option value="ASHA" data-i18n-key="phoneBelongsTo.asha">ASHA</option>
+                                <option value="Other" data-i18n-key="phoneBelongsTo.other">Other</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="campLocation">
+                                <div class="label-line">
+                                    <i class="fas fa-campground"></i>
+                                    <span data-i18n-key="label.campLocation">Camp Location</span>
+                                </div>
+                            </label>
+                            <input type="text" id="campLocation" name="campLocation"
+                                placeholder="Camp location if applicable" data-i18n-key="label.campLocationPlaceholder"
+                                data-i18n-attr="placeholder">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="residenceType">
+                                <div class="label-line">
+                                    <i class="fas fa-home"></i>
+                                    <span data-i18n-key="label.residenceType">Residence Type</span>
+                                </div>
+                            </label>
+                            <select id="residenceType" name="residenceType" required>
+                                <option value="" data-i18n-key="dropdown.select">Select Type</option>
+                                <option value="Urban" data-i18n-key="residenceType.urban">Urban</option>
+                                <option value="Rural" data-i18n-key="residenceType.rural">Rural</option>
+                                <option value="Tribal" data-i18n-key="residenceType.tribal">Tribal</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" style="grid-column: span 2;">
+                            <label for="patientAddress">
+                                <div class="label-line">
+                                    <i class="fas fa-home"></i>
+                                    <span data-i18n-key="label.address">Address</span>
+                                </div>
+                            </label>
+                            <textarea id="patientAddress" name="patientAddress" rows="3" placeholder="Full address"
+                                data-i18n-key="label.address" data-i18n-attr="placeholder" required></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="patientLocation">
+                                <div class="label-line">
+                                    <i class="fas fa-map-marker-alt"></i>
+                                    <span data-i18n-key="label.location">Location/Facility *</span>
+                                </div>
+                            </label>
+                            <input type="text" id="patientLocation" name="patientLocation" list="phcList" required
+                                placeholder="Select or type location" data-i18n-key="label.selectLocationFacility"
+                                data-i18n-attr="placeholder">
+                            <datalist id="phcList"></datalist>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="nearestAAMCenter">
+                                <div class="label-line">
+                                    <i class="fas fa-hospital"></i>
+                                    <span data-i18n-key="label.nearestAAMCenter">Nearest AAM Center</span>
+                                </div>
+                            </label>
+                            <input list="aamCentersList" id="nearestAAMCenter" name="nearestAAMCenter"
+                                placeholder="Start typing to search AAM centers"
+                                data-i18n-key="label.aamCenterPlaceholder" data-i18n-attr="placeholder">
+                            <datalist id="aamCentersList"></datalist>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="patientWeight">
+                                <div class="label-line">
+                                    <i class="fas fa-weight"></i>
+                                    <span data-i18n-key="label.patientWeightKg">Weight (kg)</span>
+                                </div>
+                            </label>
+                            <input type="number" id="patientWeight" name="Weight" step="0.1" min="0"
+                                placeholder="Weight in kg" data-i18n-key="label.weightPlaceholder"
+                                data-i18n-attr="placeholder">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="bpSystolic">
+                                <div class="label-line">
+                                    <i class="fas fa-tint"></i>
+                                    <span data-i18n-key="label.bpSystolic">Blood Pressure (Systolic)</span>
+                                </div>
+                            </label>
+                            <input type="number" id="bpSystolic" name="bpSystolic" placeholder="Systolic BP"
+                                data-i18n-key="label.bpSystolicPlaceholder" data-i18n-attr="placeholder" min="50"
+                                max="300">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="bpDiastolic">
+                                <div class="label-line">
+                                    <i class="fas fa-tint"></i>
+                                    <span data-i18n-key="label.bpDiastolic">Blood Pressure (Diastolic)</span>
+                                </div>
+                            </label>
+                            <input type="number" id="bpDiastolic" name="bpDiastolic" placeholder="Diastolic BP"
+                                data-i18n-key="label.bpDiastolicPlaceholder" data-i18n-attr="placeholder" min="30"
+                                max="200">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="bpRemark">
+                                <div class="label-line">
+                                    <i class="fas fa-comment-medical"></i>
+                                    <span data-i18n-key="label.bpRemark">BP Remark</span>
+                                </div>
+                            </label>
+                            <input type="text" id="bpRemark" name="bpRemark" placeholder="Blood pressure notes"
+                                data-i18n-key="label.bpRemarkPlaceholder" data-i18n-attr="placeholder">
+                        </div>
+
+                        <h3 class="form-section-header"><span data-i18n-key="form.medicalInfo">Medical
+                                Information</span></h3>
+
+                        <div class="form-group">
+                            <label for="diagnosis">
+                                <div class="label-line">
+                                    <i class="fas fa-stethoscope"></i>
+                                    <span data-i18n-key="label.diagnosis">Diagnosis</span>
+                                </div>
+                            </label>
+                            <select id="diagnosis" name="diagnosis" required>
+                                <option value="Epilepsy" data-i18n-key="diagnosis.epilepsy">Epilepsy</option>
+                                <option value="FDS" data-i18n-key="diagnosis.fds">FDS</option>
+                                <option value="Uncertain" data-i18n-key="diagnosis.uncertain">Uncertain</option>
+                                <option value="Other" data-i18n-key="diagnosis.other">Other</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ageOfOnset">
+                                <div class="label-line">
+                                    <i class="fas fa-calendar-alt"></i>
+                                    <span data-i18n-key="label.ageOfOnset">Age of Onset</span>
+                                </div>
+                            </label>
+                            <input type="number" id="ageOfOnset" name="ageOfOnset" placeholder="Age when symptoms began"
+                                data-i18n-key="label.ageOfOnsetPlaceholder" data-i18n-attr="placeholder" min="0"
+                                max="120">
+                        </div>
+
+                        <div class="form-group" id="epilepsyTypeGroup">
+                            <label for="patientEpilepsyType">
+                                <div class="label-line">
+                                    <i class="fas fa-brain"></i>
+                                    <span data-i18n-key="label.epilepsyType">Type of Epilepsy</span>
+                                </div>
+                            </label>
+                            <select id="patientEpilepsyType" name="epilepsyType" required>
+                                <option value="" data-i18n-key="dropdown.select">Select Type</option>
+                                <option value="Focal" data-i18n-key="epilepsyType.focal">Focal</option>
+                                <option value="Generalized" data-i18n-key="epilepsyType.generalized">Generalized
+                                </option>
+                                <option value="Unknown" data-i18n-key="epilepsyType.unknown">Unknown</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="epilepsyCategoryGroup">
+                            <label for="epilepsyCategory">
+                                <div class="label-line">
+                                    <i class="fas fa-user-md"></i>
+                                    <span data-i18n-key="label.epilepsyCategory">Epilepsy Category</span>
+                                </div>
+                            </label>
+                            <select id="epilepsyCategory" name="epilepsyCategory" required>
+                                <option value="Epilepsy Only" data-i18n-key="epilepsyCategory.only">Epilepsy Only
+                                </option>
+                                <option value="Epilepsy + GDD" data-i18n-key="epilepsyCategory.gdd">Epilepsy + Global
+                                    Developmental Delay</option>
+                                <option value="Epilepsy + MR" data-i18n-key="epilepsyCategory.mr">Epilepsy + Mental
+                                    Retardation</option>
+                                <option value="Epilepsy + CP" data-i18n-key="epilepsyCategory.cp">Epilepsy + Cerebral
+                                    Palsy</option>
+                                <option value="Epilepsy + Autism" data-i18n-key="epilepsyCategory.autism">Epilepsy +
+                                    Autism</option>
+                                <option value="Epilepsy + Multiple" data-i18n-key="epilepsyCategory.multiple">Epilepsy +
+                                    Multiple Conditions</option>
+                                <option value="Other" data-i18n-key="epilepsyCategory.other">Other</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="seizureFrequencyGroup" style="grid-column: span 2;">
+                            <label for="seizureFrequency">
+                                <div class="label-line">
+                                    <i class="fas fa-heartbeat"></i>
+                                    <span data-i18n-key="label.seizureFrequency">Seizure Frequency</span>
+                                </div>
+                            </label>
+                            <select id="seizureFrequency" name="seizureFrequency" required>
+                                <option value="" data-i18n-key="dropdown.select">Select Frequency</option>
+                                <option value="Daily" data-i18n-key="seizureFrequency.daily">Daily – Seizures on most
+                                    days (≥4 days/week, roughly >1 per day)</option>
+                                <option value="Weekly" data-i18n-key="seizureFrequency.weekly">Weekly (not daily) –
+                                    About 1–3 seizures per week (up to 6/week if not daily)</option>
+                                <option value="Monthly" data-i18n-key="seizureFrequency.monthly">Monthly (not weekly) –
+                                    About 1–3 seizures per month</option>
+                                <option value="Yearly" data-i18n-key="seizureFrequency.yearly">Yearly (not monthly) – Up
+                                    to roughly 10 per year (≤1/month on average)</option>
+                                <option value="Less than yearly" data-i18n-key="seizureFrequency.lessYearly">Less than
+                                    yearly – Fewer than 1 seizure per year</option>
+                                <option value="Only on missing medicines" data-i18n-key="seizureFrequency.missingMeds">
+                                    Seizures only on missing medicines</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="patientStatus">
+                                <div class="label-line">
+                                    <i class="fas fa-notes-medical"></i>
+                                    <span data-i18n-key="label.patientStatus">Patient Status *</span>
+                                </div>
+                            </label>
+                            <select id="patientStatus" name="patientStatus" required>
+                                <option value="New" data-i18n-key="patientStatus.new">New</option>
+                                <option value="Follow-up" data-i18n-key="patientStatus.followup">Follow-up</option>
+                            </select>
+                        </div>
+                        <div class="seizure-helper-card" id="medicalSeizureHelperCard">
+                            <div class="seizure-helper-copy">
+                                <strong>Seizure Classification Help</strong>
+                                <p>Need help determining the seizure type for medication selection?</p>
+                            </div>
+                            <button type="button" class="btn btn-primary" id="addPatientSeizureHelperBtn"
+                                data-seizure-helper-target="patientEpilepsyType">
+                                <i class="fas fa-question-circle"></i> Help Me Classify
+                            </button>
+                        </div>
+
+                        <h3 class="form-section-header" id="medicationSectionHeader"><span
+                                data-i18n-key="label.medications">Current Medications</span></h3>
+
+                        <div class="form-group">
+                            <label for="treatmentStatus">
+                                <div class="label-line">
+                                    <i class="fas fa-clipboard-check"></i>
+                                    <span data-i18n-key="label.treatmentStatus">Treatment Status</span>
+                                </div>
+                            </label>
+                            <select id="treatmentStatus" name="treatmentStatus" required>
+                                <option value="" data-i18n-key="dropdown.selectStatus">Select Status</option>
+                                <option value="Ongoing" data-i18n-key="treatmentStatus.ongoing">Ongoing</option>
+                                <option value="Completed" data-i18n-key="treatmentStatus.completed">Completed</option>
+                                <option value="Discontinued" data-i18n-key="treatmentStatus.discontinued">Discontinued
+                                </option>
+                                <option value="Alternative/Faith Healing" data-i18n-key="treatmentStatus.alternative">
+                                    Treated previously with alternative
+                                    medicines/faith healers</option>
+                                <option value="Never Treated" data-i18n-key="treatmentStatus.neverTreated">Never Treated
+                                </option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="previouslyOnDrugContainer" style="grid-column: span 2;">
+                            <label for="previouslyOnDrug">
+                                <div class="label-line">
+                                    <i class="fas fa-pills"></i>
+                                    <span data-i18n-key="label.previouslyOnDrug">Previously On Drug</span>
+                                </div>
+                            </label>
+                            <select id="previouslyOnDrug" name="previouslyOnDrug" multiple size="3"
+                                style="height: auto;">
+                                <option value="" data-i18n-key="dropdown.none">None</option>
+                                <option value="Carbamazepine" data-i18n-key="drug.cbz">Carbamazepine</option>
+                                <option value="Valproate" data-i18n-key="drug.valproate">Valproate</option>
+                                <option value="Levetiracetam" data-i18n-key="drug.levetiracetam">Levetiracetam</option>
+                                <option value="Phenytoin" data-i18n-key="drug.phenytoin">Phenytoin</option>
+                                <option value="Phenobarbital" data-i18n-key="drug.phenobarbitone">Phenobarbital</option>
+                                <option value="Clobazam" data-i18n-key="drug.clobazam">Clobazam</option>
+                                <option value="Lamotrigine" data-i18n-key="drug.lamotrigine">Lamotrigine</option>
+                                <option value="Oxcarbazepine" data-i18n-key="drug.oxcarbazepine">Oxcarbazepine</option>
+                                <option value="Topiramate" data-i18n-key="drug.topiramate">Topiramate</option>
+                                <option value="Traditional Medicine" data-i18n-key="drug.traditional">
+                                    Traditional/Alternative Medicine</option>
+                                <option value="Other" data-i18n-key="dropdown.other">Other (specify below)</option>
+                            </select>
+                            <input type="text" id="previouslyOnDrugOther" name="previouslyOnDrugOther"
+                                placeholder="Specify other medication" data-i18n-key="label.specifyOtherMedication"
+                                data-i18n-attr="placeholder" style="margin-top: 5px; display: none;">
+                        </div>
+
+                        <div class="medication-form-grid" id="medicationSection">
+                            <div class="medication-item-group">
+                                <label for="cbzDosage"><span data-i18n-key="drug.cbz">Carbamazepine CR
+                                        (200/300/400)</span>
+                                    </span></label>
+                                <select id="cbzDosage" name="cbzDosage">
+                                    <option value="" data-i18n-key="dropdown.selectDosage">Select dosage</option>
+                                    <option value="200 BD">200 mg BD</option>
+                                    <option value="300 BD">300 mg BD</option>
+                                    <option value="400 BD">400 mg BD</option>
+                                    <option value="600 BD">600 mg BD</option>
+                                    <option value="800 BD">800 mg BD</option>
+                                </select>
+                            </div>
+
+                            <div class="medication-item-group">
+                                <label for="valproateDosage"><span data-i18n-key="drug.valproate">Valproate
+                                        (200/300/500)</span>
+                                    </span></label>
+                                <select id="valproateDosage" name="valproateDosage">
+                                    <option value="" data-i18n-key="dropdown.selectDosage">Select dosage</option>
+                                    <option value="200 BD">200 mg BD</option>
+                                    <option value="300 BD">300 mg BD</option>
+                                    <option value="400 BD">400 mg BD</option>
+                                    <option value="500 BD">500 mg BD</option>
+                                    <option value="600 BD">600 mg BD</option>
+                                </select>
+                            </div>
+
+                            <div class="medication-item-group">
+                                <label for="levetiracetamDosage"><span
+                                        data-i18n-key="drug.levetiracetam">Levetiracetam</span> </label>
+                                <select id="levetiracetamDosage" name="levetiracetamDosage">
+                                    <option value="" data-i18n-key="dropdown.selectDosage">Select dosage</option>
+                                    <option value="250 BD">250 mg BD</option>
+                                    <option value="500 BD">500 mg BD</option>
+                                    <option value="750 BD">750 mg BD</option>
+                                    <option value="1000 BD">1000 mg BD</option>
+                                    <option value="1500 BD">1500 mg BD</option>
+                                </select>
+                            </div>
+
+                            <div class="medication-item-group">
+                                <label for="phenytoinDosage"><span
+                                        data-i18n-key="drug.phenytoin">Phenytoin</span></label>
+                                <select id="phenytoinDosage" name="phenytoinDosage">
+                                    <option value="" data-i18n-key="dropdown.selectDosage">Select dosage</option>
+                                    <option value="100 OD">100 mg OD</option>
+                                    <option value="200 OD">200 mg OD</option>
+                                </select>
+                            </div>
+                            <div class="medication-item-group">
+                                <label for="phenobarbitoneDosage1"><span
+                                        data-i18n-key="drug.phenobarbitone">Phenobarbitone</span> </label>
+                                <select id="phenobarbitoneDosage1" name="phenobarbitoneDosage">
+                                    <option value="" data-i18n-key="dropdown.selectDosage">Select dosage</option>
+                                    <option value="30 OD">30 mg OD</option>
+                                    <option value="60 OD">60 mg OD</option>
+                                </select>
+                            </div>
+
+                            <div class="medication-item-group">
+                                <label for="clobazamDosage"><span data-i18n-key="drug.clobazam">Clobazam</span></label>
+                                <select id="clobazamDosage" name="clobazamDosage">
+                                    <option value="" data-i18n-key="dropdown.selectDosage">Select dosage</option>
+                                    <option value="5 OD">5 mg OD</option>
+                                    <option value="10 OD">10 mg OD</option>
+                                    <option value="15 OD">15 mg OD</option>
+                                    <option value="20 OD">20 mg OD</option>
+                                </select>
+                            </div>
+
+                            <div class="medication-item-group">
+                                <label for="folicAcidDosage"><span data-i18n-key="drug.folicAcid">Folic
+                                        Acid</span></label>
+                                <select id="folicAcidDosage" name="folicAcidDosage">
+                                    <option value="" data-i18n-key="dropdown.selectDosage">Select dosage</option>
+                                    <option value="5 OD">5 mg OD</option>
+                                </select>
+                            </div>
+
+                            <div class="medication-item-group">
+                                <label for="otherDrugName"><span data-i18n-key="label.otherDrugName">Other Drug
+                                        Name</span></label>
+                                <select id="otherDrugName" name="otherDrugName">
+                                    <option value="" data-i18n-key="dropdown.selectMedication">Select medication
+                                    </option>
+                                    <option value="Lamotrigine" data-i18n-key="drug.lamotrigine">Lamotrigine</option>
+                                    <option value="Oxcarbazepine" data-i18n-key="drug.oxcarbazepine">Oxcarbazepine
+                                    </option>
+                                    <option value="Topiramate" data-i18n-key="drug.topiramate">Topiramate</option>
+                                    <option value="Gabapentin" data-i18n-key="drug.gabapentin">Gabapentin</option>
+                                    <option value="Pregabalin" data-i18n-key="drug.pregabalin">Pregabalin</option>
+                                    <option value="Zonisamide" data-i18n-key="drug.zonisamide">Zonisamide</option>
+                                    <option value="Lacosamide" data-i18n-key="drug.lacosamide">Lacosamide</option>
+                                    <option value="Perampanel" data-i18n-key="drug.perampanel">Perampanel</option>
+                                    <option value="Other" data-i18n-key="dropdown.other">Other (specify)</option>
+                                </select>
+                            </div>
+
+                            <div class="medication-item-group">
+                                <label for="otherDrugDosage"><span
+                                        data-i18n-key="label.dosage">Dosage</span></span></label>
+                                <input type="text" id="otherDrugDosage" name="otherDrugDosage"
+                                    placeholder="e.g., 100 mg BD" data-i18n-key="label.dosagePlaceholder"
+                                    data-i18n-attr="placeholder">
+                            </div>
+                        </div>
+
+                        <h3 class="form-section-header"><span data-i18n-key="form.additionalInfo">Additional
+                                Information</span></h3>
+
+                        <div class="form-group" style="grid-column: span 2;">
+                            <label for="addictions">
+                                <div class="label-line">
+                                    <i class="fas fa-smoking"></i>
+                                    <span data-i18n-key="label.addictions">Addictions</span>
+                                </div>
+                            </label>
+                            <div class="checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="addictionTobacco" value="Tobacco">
+                                    <span data-i18n-key="addiction.tobacco">Tobacco</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="addictionAlcohol" value="Alcohol">
+                                    <span data-i18n-key="addiction.alcohol">Alcohol</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="addictionOther" value="Other">
+                                    <span data-i18n-key="addiction.other">Other</span>
+                                </label>
+                                <div id="addictionOtherContainer" style="margin-top: 8px; display: none;">
+                                    <input type="text" id="addictionOtherText" placeholder="Specify other addiction"
+                                        data-i18n-key="label.specifyOtherAddiction" data-i18n-attr="placeholder"
+                                        style="width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px;">
+                                </div>
+                            </div>
+                            <input type="hidden" id="addictions" name="addictions">
+                        </div>
+
+                        <div class="form-group" style="grid-column: span 2;">
+                            <label for="injuryType">
+                                <div class="label-line">
+                                    <i class="fas fa-band-aid"></i>
+                                    <span data-i18n-key="label.injuryType">Injury Type</span>
+                                </div>
+                            </label>
+                            <div class="injury-map-container">
+                                <div class="body-svg-container">
+                                    <svg id="body-map" class="body-svg" viewBox="0 0 120 400" width="120" height="400">
+                                        <ellipse id="head" data-name="Head" cx="60" cy="40" rx="22" ry="22" />
+                                        <rect id="neck" data-name="Neck" x="54" y="62" width="12" height="16" rx="4" />
+                                        <rect id="torso" data-name="Torso" x="44" y="62" width="32" height="80"
+                                            rx="16" />
+                                        <polygon id="left-arm" data-name="Left Arm"
+                                            points="44,70 20,120 32,128 56,80" />
+                                        <polygon id="right-arm" data-name="Right Arm"
+                                            points="76,80 100,128 112,120 88,70" />
+                                        <polygon id="left-leg" data-name="Left Leg"
+                                            points="52,142 40,220 56,220 60,142" />
+                                        <polygon id="right-leg" data-name="Right Leg"
+                                            points="68,142 72,220 88,220 76,142" />
+                                    </svg>
+                                </div>
+                                <div class="injury-details-container">
+                                    <h4 data-i18n-key="injury.selected">Selected Injuries</h4>
+                                    <ul id="selected-injuries-list"></ul>
+                                    <input type="hidden" id="injuriesData" name="injuriesData">
+                                </div>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" style="grid-column: span 2;"
+                            data-i18n-key="button.addPatient" data-requires-online="true">
+                            <i class="fas fa-save"></i> <span data-i18n-key="button.addPatient">Add Patient</span>
+                        </button>
+                        <button type="button" class="btn btn-warning" id="saveDraftPatientBtn"
+                            style="grid-column: span 2; margin-left: 12px;" data-i18n-key="button.saveDraft">
+                            <i class="fas fa-file-alt"></i> <span data-i18n-key="button.saveDraft">Save Draft</span>
+                        </button>
+                    </form>
+                </div>
+            </section>
+
+            <section id="follow-up" class="tab-pane" style="display:none;">
+                <div class="chart-box">
+                    <h3><i class="fas fa-calendar-check"></i> <span data-i18n-key="followup.conduct">Conduct Patient
+                            Follow-up</span></h3>
+                    <div style="margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+                        <button class="btn btn-secondary" id="downloadFollowUpsCsvBtn" title="followup.downloadCsv"
+                            data-i18n-key="followup.downloadCsv">
+                            <i class="fas fa-file-csv"></i> <span data-i18n-key="followup.downloadCsv">Download This
+                                Month's Follow-ups (CSV)</span>
+                        </button>
+                        <div id="followUpExportSelectors" style="display:none; gap:8px; align-items:center;">
+                            <label for="followUpExportMonth" style="margin:0; color: var(--medium-text);"
+                                data-i18n-key="followup.month">Month</label>
+                            <select id="followUpExportMonth"></select>
+                            <label for="followUpExportYear" style="margin:0; color: var(--medium-text);"
+                                data-i18n-key="followup.year">Year</label>
+                            <select id="followUpExportYear"></select>
+                        </div>
+                    </div>
+
+                    <!-- PHC Filter, Search Bar, AAM Toggle in a single row -->
+                    <div class="follow-up-filters"
+                        style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 20px;">
+                        <div class="form-group" id="phcFollowUpSelectContainer"
+                            style="margin: 0; min-width: 200px; flex-shrink: 0;">
+                            <select id="phcFollowUpSelect" class="form-control"
+                                style="padding: 10px 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem;">
+                                <option value="" data-i18n-key="dropdown.selectPHC">-- Select a Facility --</option>
+                            </select>
+                        </div>
+
+                        <div class="search-container" id="followUpSearchContainer"
+                            style="flex: 1; min-width: 250px; margin: 0;">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="followUpPatientSearch"
+                                placeholder="Search follow-ups by name, CHC, or ID..." data-i18n-key="patients.search"
+                                data-i18n-attr="placeholder" aria-label="patients.search">
+                        </div>
+
+                        <div id="aamSortControls" style="flex-shrink: 0;">
+                            <button class="btn btn-outline-secondary" id="aamSortBtn" title="followup.filterAAM"
+                                data-i18n-key="followup.filterAAM"
+                                style="padding: 10px 16px; border-radius: 8px; font-weight: 500;">
+                                <i class="fas fa-filter"></i> <span data-i18n-key="followup.filterAAM">All AAMs</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="followUpPatientListContainer" style="margin-top: 20px;">
+                        <p data-i18n-key="followup.selectFacilityMsg">Please select a facility to see the list of
+                            patients requiring follow-up.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="management" class="tab-pane" style="display:none;">
+                <div class="chart-box">
+                    <h3><i class="fas fa-tools"></i> <span data-i18n-key="management.systemManagement">System
+                            Management</span></h3>
+
+                    <!-- Management sub-tabs -->
+                    <nav class="management-subtabs" style="margin-top: 16px; display:flex; gap:8px; flex-wrap:wrap;">
+                        <button class="btn btn-sm btn-outline-primary management-subtab active" data-subtab="mg-users"
+                            data-i18n-key="mg.users"><i class="fas fa-users"></i> Users</button>
+                        <button class="btn btn-sm btn-outline-primary management-subtab" data-subtab="mg-facilities"
+                            data-i18n-key="mg.facilities"><i class="fas fa-clinic-medical"></i> Facilities</button>
+                        <button class="btn btn-sm btn-outline-primary management-subtab" data-subtab="mg-analytics"
+                            data-i18n-key="mg.analytics"><i class="fas fa-chart-pie"></i> Analytics</button>
+                        <button class="btn btn-sm btn-outline-primary management-subtab" data-subtab="mg-logs"
+                            data-i18n-key="mg.logs"><i class="fas fa-file-alt"></i> Logs</button>
+                        <button class="btn btn-sm btn-outline-primary management-subtab" data-subtab="mg-export"
+                            data-i18n-key="mg.export"><i class="fas fa-download"></i> Export</button>
+                        <button class="btn btn-sm btn-outline-danger management-subtab" data-subtab="mg-advanced"
+                            id="mg-advanced-tab" style="display:none;" data-i18n-key="mg.advanced"><i
+                                class="fas fa-cogs"></i> Advanced</button>
+                    </nav>
+
+                    <!-- Subtab containers -->
+                    <div id="mg-users" class="mg-subtab" style="margin-top:18px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <h4 data-i18n-key="management.phcStaff">Facility Staff Management</h4>
+                            <div>
+                                <button class="btn btn-primary" id="addUserBtn" data-i18n-key="management.addUser">Add
+                                    Facility User</button>
+                            </div>
+                        </div>
+                        <div id="usersTableContainer" style="margin-top:12px;" data-i18n-key="management.loadingUsers">
+                            Loading users...</div>
+                    </div>
+
+                    <!-- Add User Modal -->
+                    <div id="addUserModal" class="modal"
+                        style="display:none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 2000;">
+                        <div class="modal-content"
+                            style="width: 480px; background:#fff; border-radius:8px; padding:16px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <h4 style="margin:0" data-i18n-key="management.addUser">Add Facility User</h4>
+                                <button id="closeAddUserModal" class="btn"
+                                    style="background:transparent;border:none;font-size:1.2rem;">&times;</button>
+                            </div>
+                            <form id="addUserForm" style="margin-top:12px;">
+                                <div id="addUserFormErrors" style="margin-bottom:8px;color:#a33;"></div>
+                                <div class="form-group">
+                                    <label for="addUserName" data-i18n-key="mg.addUser.fullname">Full name</label>
+                                    <input id="addUserName" type="text" class="form-control" required />
+                                </div>
+                                <div class="form-group">
+                                    <label for="addUserEmail" data-i18n-key="mg.addUser.email">Email</label>
+                                    <input id="addUserEmail" type="email" class="form-control" required />
+                                </div>
+                                <div class="form-group" style="display:none;">
+                                    <label for="addUserRole" data-i18n-key="mg.addUser.role">Role</label>
+                                    <select id="addUserRole" class="form-control">
+                                        <option value="phc">Facility Staff</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" id="addUserPhcWrapper">
+                                    <label for="addUserPhcSelect" data-i18n-key="mg.addUser.assignPhc">Assign Facility <span
+                                            style="color:red;">*</span></label>
+                                    <select id="addUserPhcSelect" class="form-control" required>
+                                        <option value="">-- Select Facility --</option>
+                                    </select>
+                                </div>
+                                <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
+                                    <button type="button" id="cancelAddUserBtn"
+                                        class="btn btn-secondary">Cancel</button>
+                                    <button type="submit" id="submitAddUserBtn" class="btn btn-primary"
+                                        data-i18n-key="management.addUser">Add Facility User</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div id="mg-facilities" class="mg-subtab" style="margin-top:18px; display:none;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <h4 data-i18n-key="management.facilitiesPhcs">Facilities</h4>
+                            <button class="btn btn-primary" id="addPhcBtn" data-i18n-key="management.addPHC">Add
+                                Facility</button>
+                        </div>
+                        <div id="phcListContainer" style="margin-top:12px;" data-i18n-key="management.loadingPHCList">
+                            Loading facilities...</div>
+                    </div>
+
+                    <div id="mg-analytics" class="mg-subtab" style="margin-top:18px; display:none;">
+                        <h4 data-i18n-key="management.analytics">Analytics</h4>
+                        <div id="managementAnalyticsContainer" style="margin-top:12px;"
+                            data-i18n-key="management.analyticsWidgets">Analytics widgets will be shown
+                            here.</div>
+                    </div>
+
+                    <div id="mg-logs" class="mg-subtab" style="margin-top:18px; display:none;">
+                        <h4>Action Logs & Audit Trail</h4>
+                        <div id="adminLogsContainer" style="margin-top:12px;" data-i18n-key="management.loadingLogs">
+                            Loading logs...</div>
+                    </div>
+
+                    <div id="mg-export" class="mg-subtab" style="margin-top:18px; display:none;">
+                        <h4>Data Export</h4>
+                        <div id="adminExportContainer" style="margin-top:12px;">
+                            <p><i class="fas fa-shield-alt"></i> Exports are de-identified for confidentiality: Phone numbers are masked (last 4 digits replaced with ####) and address fields are excluded. Use with caution.</p>
+                            <button class="btn btn-secondary" id="exportReferralDataBtn" onclick="window.downloadReferralCsv && window.downloadReferralCsv()">
+                                <i class="fas fa-file-csv"></i> Export Referral Data (.csv)
+                            </button>
+                            <button class="btn btn-info" id="exportMonthlyFollowUpStatusBtn" style="margin-left: 10px;" onclick="window.exportMonthlyFollowUpStatusCSV && window.exportMonthlyFollowUpStatusCSV()">
+                                <i class="fas fa-calendar-alt"></i> Export Monthly Follow-up Status
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="mg-advanced" class="mg-subtab" style="margin-top:18px; display:none;">
+                        <h4>Advanced / Dangerous Actions</h4>
+                        <p style="color:var(--danger-color);">These actions are irreversible. Back up your data first.
+                        </p>
+                        <div style="margin-top:12px;">
+                            <button class="btn btn-danger" id="resetAllFollowupsBtn">Reset all follow-ups for all
+                                patients</button>
+                            <div style="margin-top:8px;"><small>To proceed you will be asked to type
+                                    <strong>RESET</strong> and confirm.</small></div>
+                        </div>
+
+                        <div style="margin-top:20px; padding-top:20px; border-top:1px solid #e9ecef;">
+                            <h5>Clinical Decision Support Settings</h5>
+                            <p style="color:var(--medium-text); font-size:0.9rem;">Manage Clinical Decision Support
+                                system configuration and governance.</p>
+
+                            <!-- CDS Global Toggle -->
+                            <div style="margin-top:15px;">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="cdsGlobalToggle" checked>
+                                    <label class="form-check-label" for="cdsGlobalToggle">
+                                        <strong>Enable Clinical Decision Support System</strong>
+                                    </label>
+                                </div>
+                                <small class="form-text text-muted">Globally enable or disable CDS alerts and
+                                    recommendations.</small>
+                            </div>
+
+                            <!-- Knowledge Base Info -->
+                            <div style="margin-top:15px; padding:10px; background:#f8f9fa; border-radius:5px;">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <small><strong>Knowledge Base Version:</strong> <span
+                                                id="cdsKBVersion">Loading...</span></small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <small><strong>Active Rules:</strong> <span
+                                                id="cdsActiveRules">Loading...</span></small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- CDS Management Buttons -->
+                            <div style="margin-top:15px; display:flex; gap:10px; flex-wrap:wrap;">
+                                <button class="btn btn-outline-primary btn-sm" id="viewCDSRulesBtn">
+                                    <i class="fas fa-list"></i> View Rules
+                                </button>
+                                <button class="btn btn-outline-info btn-sm" id="viewCDSAuditBtn">
+                                    <i class="fas fa-history"></i> Audit Log
+                                </button>
+                                <button class="btn btn-outline-success btn-sm" id="exportCDSTelemetryBtn">
+                                    <i class="fas fa-download"></i> Export Telemetry
+                                </button>
+                                <button class="btn btn-outline-warning btn-sm" id="resetCDSSettingsBtn">
+                                    <i class="fas fa-undo"></i> Reset Settings
+                                </button>
+                            </div>
+
+                            <!-- Legacy CDSS Disclaimer Reset -->
+                            <div style="margin-top:15px; padding-top:15px; border-top:1px solid #dee2e6;">
+                                <button class="btn btn-warning btn-sm" id="resetCDSSDisclaimerBtn">Reset CDSS Disclaimer
+                                    for All Users</button>
+                                <div style="margin-top:5px;"><small>Force all users to see the clinical disclaimer again
+                                        before using Clinical Guidance Aid.</small></div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Keep legacy admin tools for quick actions -->
+                <div id="adminTools" style="margin-top: 18px;">
+                    <h4>Quick Admin Tools</h4>
+                    <button class="btn btn-secondary" id="toggleVisitorAddPatientBtn"
+                        data-i18n-key="management.toggleVisitorAddPatient"><i class="fas fa-user"></i> <span
+                            data-i18n-key="management.toggleVisitorAddPatient">Allow Add Patient tab for Viewer
+                            Login</span></button>
+                    <div style="margin-top: 10px; font-size: 0.9rem; color: var(--medium-text);">
+                        <i class="fas fa-info-circle"></i> <span data-i18n-key="management.toggleVisitorInfo">This
+                            toggle allows viewers to access the Add Patient tab for data entry purposes</span>
+                    </div>
+                </div>
+            </section>
+
+            <section id="referred" class="tab-pane" style="display:none;">
+
+                <div class="chart-box">
+                    <h3><i class="fas fa-user-md"></i> Referred Patients Queue</h3>
+                    <p style="margin-top: -10px; color: var(--medium-text);">Patients referred by CHOs for medical officer review.</p>
+
+                    <!-- PHC Filter, Search Bar, AAM Toggle for Referred Tab -->
+                    <div class="follow-up-filters" style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 20px;">
+                        <div class="form-group" id="referredPhcSelectContainer" style="margin: 0; min-width: 200px; flex-shrink: 0;">
+                            <select id="referredPhcSelect" class="form-control" style="padding: 10px 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem;">
+                                <option value="" data-i18n-key="dropdown.selectPHC">-- Select a Facility --</option>
+                                <option value="Baharagora CHC">Baharagora CHC</option>
+                                <option value="Chakulia CHC">Chakulia CHC</option>
+                                <option value="Dhalbhumgarh CHC">Dhalbhumgarh CHC</option>
+                                <option value="Dumaria CHC">Dumaria CHC</option>
+                                <option value="Ghatshila CHC">Ghatshila CHC</option>
+                                <option value="Golmuri cum Jugsalai CHC">Golmuri cum Jugsalai CHC</option>
+                                <option value="Musabani CHC">Musabani CHC</option>
+                                <option value="Patamda CHC">Patamda CHC</option>
+                                <option value="Potka CHC">Potka CHC</option>
+                                <option value="Urban JSR">Urban JSR</option>
+                                <option value="Out of district">Out of district</option>
+                            </select>
+                        </div>
+
+                        <div class="search-container" id="referredSearchContainer" style="flex: 1; min-width: 250px; margin: 0;">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="referredPatientSearch" placeholder="Search Patients" data-i18n-key="patients.search" data-i18n-attr="placeholder" aria-label="patients.search">
+                        </div>
+
+                        <div id="referredAamSortControls" style="flex-shrink: 0; display: block;">
+                            <button class="btn btn-outline-secondary" id="referredAamSortBtn" title="Click to filter by AAM center" data-i18n-key="followup.filterAAM" style="padding: 10px 16px; border-radius: 8px; font-weight: 500;"><i class="fas fa-filter"></i> All AAMs</button>
+                        </div>
+                    </div>
+
+                    <div id="referredPatientList" style="margin-top: 20px;">
+                        <!-- Patient cards will be dynamically inserted here -->
+                    </div>
+                </div>
+
+                <!-- Tertiary Care Queue - Master Admin Only -->
+                <div class="chart-box" id="tertiaryCareSection"
+                    style="display: none; margin-top: 30px; border-left: 4px solid #e74c3c;">
+                    <h3 style="color: #e74c3c;">
+                        <i class="fas fa-hospital"></i> Tertiary Care Queue (AIIMS Referrals)
+                        <!-- Removed inline Hindi translation; handled by i18n -->
+                    </h3>
+                    <p style="margin-top: -10px; color: var(--medium-text);">
+                        Patients referred for specialized tertiary care at AIIMS. High-priority cases requiring expert
+                        consultation.
+                        <!-- Removed inline Hindi translation; handled by i18n -->
+                    </p>
+
+                    <div
+                        style="background: #fff5f5; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #fecaca;">
+                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                            <i class="fas fa-exclamation-triangle" style="color: #dc2626; margin-right: 8px;"></i>
+                            <strong style="color: #dc2626;">Priority Queue Management</strong>
+                        </div>
+                        <p style="margin: 0; font-size: 0.9em; color: #374151;">
+                            These patients require urgent attention and coordination with AIIMS specialists.
+                            Follow up on referral status and ensure proper documentation.
+                        </p>
+                    </div>
+
+                    <div id="tertiaryCarePatientList" style="margin-top: 20px;">
+                        <!-- Tertiary care patient cards will be dynamically inserted here -->
+                    </div>
+
+                    <div id="tertiaryStatsContainer"
+                        style="margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div class="stat-card" style="background: #fef3c7; border-left: 4px solid #f59e0b;">
+                            <div class="stat-label">Pending Referrals</div>
+                            <div class="stat-value" id="pendingTertiaryCount">0</div>
+                        </div>
+                        <div class="stat-card" style="background: #ecfdf5; border-left: 4px solid #10b981;">
+                            <div class="stat-label">Completed Consultations</div>
+                            <div class="stat-value" id="completedTertiaryCount">0</div>
+                        </div>
+                        <div class="stat-card" style="background: #fef2f2; border-left: 4px solid #ef4444;">
+                            <div class="stat-label">Average Wait Time</div>
+                            <div class="stat-value" id="avgTertiaryWaitTime">—</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Stock Management Tab -->
+            <section id="stock" class="tab-pane" style="display:none;">
+                <div class="chart-box">
+                    <h3>
+                        <i class="fas fa-boxes-stacked"></i> Stock Management
+                        <span style="font-weight: normal; color: var(--medium-text); margin-left: 8px;">
+                            Facility: <span id="stockPhcName">—</span>
+                        </span>
+                    </h3>
+                    <p style="margin-top: -10px; color: var(--medium-text);">Enter available quantities for each
+                        medicine and click Update Stock Levels.</p>
+
+                    <!-- Master Admin PHC selector (shown only for master_admin via JS) -->
+                    <div id="stockPhcSelectorContainer" class="form-group"
+                        style="display:none; max-width: 320px; margin: 10px 0;">
+                        <label for="stockPhcSelector">
+                            <div class="label-line">
+                                <i class="fas fa-clinic-medical"></i>
+                                <span>Select Facility</span>
+                            </div>
+                        </label>
+                        <select id="stockPhcSelector"></select>
+                    </div>
+
+                    <form id="stockForm" class="form-grid" style="margin-top: 16px;">
+                        <!-- Dynamic stock fields will be injected here by renderStockForm() -->
+                    </form>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+
+    <div id="followUpModal" class="loading-indicator"
+        style="overflow-y: auto; align-items: flex-start; padding-top: 10px; display:none;">
+        <div class="modal-content">
+            <div class="modal-header"
+                style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; padding-bottom: 8px;">
+                <div class="modal-title-section">
+                    <button class="modal-close" onclick="closeFollowUpModal()"
+                        style="float: right; margin-left: 8px; font-size: 1.2rem;">&times;</button>
+                    <h4 id="followUpModalTitle" data-i18n-key="followup.modalDefaultTitle" style="font-size: 1rem; margin: 0;">Patient Follow-up</h4>
+                </div>
+
+                <!-- Follow-up Frequency Selector -->
+                <div id="followFrequencySection" class="frequency-selector" style="display: none;">
+                    <div class="frequency-label" style="font-size: 0.75rem;">
+                        <i class="fas fa-calendar-alt"></i>
+                        <span data-i18n-key="followup.frequency">Follow-up Frequency</span>
+                    </div>
+                    <button type="button" id="followFrequencyButton" class="frequency-button"
+                        onclick="toggleFollowFrequency('frequencyDropdown')" style="padding: 4px 10px; font-size: 0.85rem;">
+                        <span id="currentFrequency">Monthly</span>
+                        <i class="fas fa-chevron-down"></i>
+                    </button>
+                    <div id="frequencyDropdown" class="frequency-dropdown" style="display: none;">
+                        <div class="frequency-option" onclick="updateFollowFrequencySelected('Monthly')" style="padding: 6px 10px;">
+                            <i class="fas fa-calendar"></i>
+                            <span>Monthly</span>
+                            <small>Every month</small>
+                        </div>
+                        <div class="frequency-option" onclick="updateFollowFrequencySelected('Quarterly')" style="padding: 6px 10px;">
+                            <i class="fas fa-calendar-plus"></i>
+                            <span>Quarterly</span>
+                            <small>Every 3 months</small>
+                        </div>
+                        <div class="frequency-option" onclick="updateFollowFrequencySelected('Bi-yearly')" style="padding: 6px 10px;">
+                            <i class="fas fa-calendar-times"></i>
+                            <span>Bi-yearly</span>
+                            <small>Every 6 months</small>
+                        </div>
+                    </div>
+                    <div id="frequencyStatus" class="frequency-status" style="display: none; font-size: 0.75rem;">
+                        <i class="fas fa-check-circle"></i>
+                        <span>Frequency updated</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="education-center-container" style="margin-bottom: 8px;">
+                <button type="button" class="btn btn-secondary" id="toggleEducationGuideBtn"
+                    onclick="toggleEducationCenter('patientEducationCenter', this)" data-i18n-key="education.showGuide"
+                    style="padding: 6px 12px; font-size: 0.85rem;">
+                    <i class="fas fa-book-open"></i> <span data-i18n-key="education.showGuide">Show Patient Education
+                        Guide</span>
+                </button>
+                <div id="patientEducationCenter"
+                    style="display: none; margin-top: 8px; background: #f8f9fa; padding: 10px; border-radius: 6px; border-left: 3px solid var(--primary-color);">
+                </div>
+            </div>
+
+            <div class="success-message" id="followUpSuccessMessage">
+                <i class="fas fa-check-circle"></i>
+                <span data-i18n-key="followup.success">Follow-up submitted successfully!</span>
+            </div>
+
+            <div class="prescribed-drugs-section" id="prescribedDrugsSection">
+                <h4 style="font-size: 0.9rem; margin-bottom: 0.25rem;"><i class="fas fa-pills"></i> <span data-i18n-key="followup.currentlyPrescribedDrugs">Currently
+                        Prescribed Drugs</span></h4>
+                <div class="drug-list" id="prescribedDrugsList">
+                </div>
+            </div>
+
+            <!-- Clinical Decision Support Alerts -->
+            <div id="cdsAlertsContainer" style="margin-top: 8px; display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <h4 style="margin: 0; font-size: 0.9rem;"><i class="fas fa-stethoscope"></i> <span data-i18n-key="cds.title">Clinical
+                            Decision Support</span></h4>
+                    <small id="cdsVersionDisplay" class="text-muted" style="font-size: 0.7rem;">CDS v0.1.0</small>
+                </div>
+                <!-- Per-patient critical alerts: isolated from dashboard -->
+                <div id="cdsCriticalAlertsSection" style="display: none; margin-bottom: 10px;"></div>
+                <div id="cdsAlerts" class="cds-alerts-panel">
+                    <!-- CDS alerts will be populated here by the CDS system -->
+                </div>
+            </div>
+
+            <form id="followUpForm" class="form-grid" style="margin-top: 8px; display: none;">
+                <div id="drugDoseVerificationSection" style="grid-column: 1 / -1;">
+                    <div class="form-group" style="margin-top: 0.25rem; margin-bottom: 0.5rem;">
+                        <label for="drugDoseVerification">
+                            <div class="label-line">
+                                <span data-i18n-key="doseVerification.question">Is this the dose of drugs actually being
+                                    taken? *</span>
+                            </div>
+                        </label>
+                        <select id="DrugDoseVerification" name="DrugDoseVerification" required
+                            style="background: #fff3cd; border-color: var(--warning-color);">
+                            <option value="">Select</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                            <option value="Not sure">Not sure</option>
+                        </select>
+                        <div style="margin-top: 0.25rem; font-size: 0.8rem; color: var(--warning-color);">
+                            <i class="fas fa-exclamation-triangle"></i> <span data-i18n-key="doseVerification.note">This
+                                information helps verify medication adherence</span>
+                        </div>
+                    </div>
+                </div>
+                <input type="hidden" id="PatientID" name="PatientID">
+                <input type="hidden" id="FollowFrequency" name="FollowFrequency" value="">
+
+                <h3 class="form-section-header"><span data-i18n-key="followup.details">Follow-up Details</span></h3>
+
+                <!-- Epilepsy Type Classification Section -->
+                <div class="form-group" id="epilepsyTypeSection" style="display: none;">
+                    <label for="epilepsyType">
+                        <div class="label-line">
+                            <span data-i18n-key="epilepsy.classificationTitle">Epilepsy Type Classification *</span>
+                            <i class="fas fa-info-circle" title="Required for optimal medication recommendations"></i>
+                        </div>
+                    </label>
+                    <div style="display: flex; gap: 1rem; align-items: flex-start;">
+                        <select id="epilepsyType" name="epilepsyType" onchange="updateEpilepsyType()" style="flex: 1;">
+                            <option value="" data-i18n-key="dropdown.select">Select Classification</option>
+                            <option value="Focal" data-i18n-key="epilepsyOption.focal">Focal Seizures</option>
+                            <option value="Generalized" data-i18n-key="epilepsyOption.generalized">Generalized Seizures
+                            </option>
+                            <option value="Unknown" data-i18n-key="epilepsyOption.unknown">Unknown/Unclassified</option>
+                        </select>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="followupSeizureHelperBtn"
+                            data-seizure-helper-target="epilepsyType" style="margin-top: 0.25rem; white-space: nowrap;">
+                            <i class="fas fa-question-circle"></i> Need Help?
+                        </button>
+                    </div>
+                    <div class="classification-help" style="margin-top: 0.5rem; font-size: 0.85rem; color: #666;">
+                        <i class="fas fa-lightbulb"></i>
+                        <strong>Focal:</strong> Partial seizures, starts in one brain area.
+                        <strong>Generalized:</strong> Involves both brain hemispheres.
+                    </div>
+                    <div id="classificationStatus" class="status-indicator" style="margin-top: 0.5rem; display: none;">
+                        <i class="fas fa-check-circle" style="color: var(--success-color);"></i>
+                        <span>Classification updated - CDS recommendations refreshed</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="choName">
+                        <div class="label-line">
+                            <span data-i18n-key="followup.choName">Name of CHO doing follow-up *</span>
+                        </div>
+                    </label>
+                    <input type="text" id="CHOName" name="CHOName" required>
+                </div>
+                <div class="form-group">
+                    <label for="followUpDate">
+                        <div class="label-line">
+                            <span data-i18n-key="followup.date">Date of follow-up call *</span>
+                        </div>
+                    </label>
+                    <input type="date" id="FollowUpDate" name="FollowUpDate" required>
+                </div>
+
+                <!-- New field: Follow-up Mode -->
+                <div class="form-group">
+                    <label for="FollowUpMethod">
+                        <div class="label-line">
+                            <span data-i18n-key="followup.modeLabel">Follow-up conducted *</span>
+                        </div>
+                    </label>
+                    <select id="FollowUpMethod" name="FollowUpMethod" required>
+                        <option value="" data-i18n-key="dropdown.select">Select mode</option>
+                        <option value="Physical" data-i18n-key="followup.mode.physical">Physical visit</option>
+                        <option value="Telephonic" data-i18n-key="followup.mode.telephonic">Telephonic call</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="PhoneCorrect">
+                        <div class="label-line">
+                            <span data-i18n-key="followup.phoneCorrect">Was phone number correct? *</span>
+                        </div>
+                    </label>
+                    <select id="PhoneCorrect" name="PhoneCorrect" required>
+                        <option value="">Select</option>
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                    </select>
+                </div>
+                <div class="form-group" id="correctedPhoneContainer" style="display: none;">
+                    <label for="CorrectedPhoneNumber">
+                        <div class="label-line">
+                            <span data-i18n-key="followup.correctedPhone">Enter Correct Phone Number</span>
+                        </div>
+                    </label>
+                    <input type="tel" id="CorrectedPhoneNumber" name="CorrectedPhoneNumber"
+                        placeholder="New 10-digit number" data-i18n-key="followup.correctedPhonePlaceholder"
+                        data-i18n-attr="placeholder" pattern="\d{10}">
+                </div>
+
+                <h3 class="form-section-header"><span data-i18n-key="followup.significantTitle">Significant Patient
+                        Events</span></h3>
+                <div class="form-group"
+                    style="grid-column: 1 / -1; background: #fef5e7; border-left: 4px solid var(--warning-color); padding: 15px; border-radius: var(--border-radius);">
+                    <label for="SignificantEvent">
+                        <div class="label-line">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <span data-i18n-key="followup.significantQuestion">Has there been a significant event?
+                                *</span>
+                        </div>
+                    </label>
+                    <select id="SignificantEvent" name="SignificantEvent" required>
+                        <option value="None" selected data-i18n-key="followup.significant.none">None</option>
+                        <option value="Patient is Pregnant" data-i18n-key="followup.significant.pregnant">Patient is
+                            Pregnant</option>
+                        <option value="Patient has Passed Away" data-i18n-key="followup.significant.deceased">Patient
+                            has Passed Away</option>
+                    </select>
+                </div>
+
+                <div id="deceasedInfoSection" class="form-group"
+                    style="grid-column: 1 / -1; display: none; background: #fdecea; border-left: 4px solid var(--danger-color); padding: 15px; border-radius: var(--border-radius);">
+                    <label for="DateOfDeath">
+                        <div class="label-line">
+                            <i class="fas fa-calendar-times"></i>
+                            <span data-i18n-key="label.dateOfDeath">Date of Death *</span>
+                        </div>
+                    </label>
+                    <input type="date" id="DateOfDeath" name="DateOfDeath">
+                    <label for="causeOfDeath" style="margin-top: 15px;">
+                        <div class="label-line">
+                            <i class="fas fa-notes-medical"></i>
+                            <span data-i18n-key="label.causeOfDeath">Cause of Death (if known)</span>
+                        </div>
+                    </label>
+                    <textarea id="CauseOfDeath" name="CauseOfDeath" rows="2" placeholder="Enter cause of death"
+                        data-i18n-key="placeholder.causeOfDeath" data-i18n-attr="placeholder"></textarea>
+                </div>
+
+                <div id="pregnancyInfoSection" class="guidance-message"
+                    style="grid-column: 1 / -1; display: none; background: #fff3cd; border-left: 4px solid var(--warning-color); padding: 15px; border-radius: 4px; margin: 10px 0;">
+                    <h4 style="color: #000000; margin-top: 0;"><i class="fas fa-female"></i> Pregnancy Information</h4>
+                    <p style="color: #000000; margin-bottom: 10px;">Please provide counseling on not stopping drugs
+                        during pregnancy. Ensure the patient is referred to a Medical Officer for immediate review.</p>
+                    <div id="pregnancyDrugWarning"
+                        style="color: var(--danger-color); font-weight: bold; margin-top: 10px; padding: 8px; background: rgba(255, 255, 255, 0.5); border-radius: 4px;">
+                    </div>
+                </div>
+
+                <h3 class="form-section-header"><span data-i18n-key="patient.status.title">Patient Status</span></h3>
+                <div class="form-group" style="grid-column: 1 / -1;">
+                    <label for="FeltImprovement">
+                        <div class="label-line">
+                            <span data-i18n-key="followup.feltImprovement">Since your last visit, have you experienced any improvement related to your seizures? *</span>
+                        </div>
+                    </label>
+                    <select id="FeltImprovement" name="FeltImprovement" required>
+                        <option value="">Select</option>
+                        <option value="Yes">Yes</option>
+                        <option value="No">No, Less Seizures</option>
+                        <option value="No">No, More Seizures</option>
+                    </select>
+                </div>
+
+                <div class="form-group" style="grid-column: 1 / -1;">
+                    <label for="SeizureFrequency">
+                        <div class="label-line">
+                            <span data-i18n-key="followup.seizuresSince">How many seizures have you had since your last
+                                visit/follow up? *</span>
+                        </div>
+                    </label>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <input type="number" id="SeizureFrequency" name="SeizureFrequency" min="0" required
+                            placeholder="Enter number of seizures since last visit" style="flex: 1;">
+                        <div id="lastVisitDateDisplay" style="font-size: 0.9em; color: #666;">Last Visit: N/A</div>
+                    </div>
+                </div>
+
+                <div id="noImprovementQuestions"
+                    style="display: none; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.25rem;">
+                    <div class="form-group">
+                        <label for="SeizureTypeChange">
+                            <div class="label-line">
+                                <span data-i18n-key="question.seizureConsciousnessChange">Any change in consciousness
+                                    during seizure?</span>
+                            </div>
+                            <!-- Removed inline Hindi translation; handled by i18n -->
+                        </label>
+                        <input type="text" id="SeizureTypeChange" name="SeizureTypeChange"
+                            placeholder="Describe any change in consciousness">
+                    </div>
+                    <!-- Women's health and catamenial questions -->
+                    <div class="form-group">
+                        <label for="hormonalContraception">
+                            <div class="label-line">
+                                <span data-i18n-key="question.hormonalContraception">Is the patient using hormonal
+                                    contraception? *</span>
+                            </div>
+                            <!-- Removed inline Hindi translation; handled by i18n -->
+                        </label>
+                        <select id="hormonalContraception" name="hormonalContraception">
+                            <option value="">Select</option>
+                            <option value="true">Yes</option>
+                            <option value="false">No</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="irregularMenses">
+                            <div class="label-line">
+                                <span data-i18n-key="question.irregularMenses">Any irregular menstrual periods since
+                                    last visit?</span>
+                            </div>
+                            <!-- Removed inline Hindi translation; handled by i18n -->
+                        </label>
+                        <select id="irregularMenses" name="irregularMenses">
+                            <option value="">Select</option>
+                            <option value="true">Yes</option>
+                            <option value="false">No</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="weightGain">
+                            <div class="label-line">
+                                <span data-i18n-key="question.weightGain">Recent weight gain since last visit?</span>
+                            </div>
+                            <!-- Removed inline Hindi translation; handled by i18n -->
+                        </label>
+                        <select id="weightGain" name="weightGain">
+                            <option value="">Select</option>
+                            <option value="true">Yes</option>
+                            <option value="false">No</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="catamenialPattern">
+                            <div class="label-line">
+                                <span data-i18n-key="question.catamenialPattern">Do seizures worsen around the menstrual
+                                    cycle?</span>
+                            </div>
+                            <!-- Removed inline Hindi translation; handled by i18n -->
+                        </label>
+                        <select id="catamenialPattern" name="catamenialPattern">
+                            <option value="">Select</option>
+                            <option value="true">Yes</option>
+                            <option value="false">No</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="SeizureDurationChange">
+                            <div class="label-line">
+                                <span data-i18n-key="question.seizureDurationChange">Any changes in duration of
+                                    seizures?</span>
+                            </div>
+                            <!-- Removed inline Hindi translation; handled by i18n -->
+                        </label>
+                        <input type="text" id="SeizureDurationChange" name="SeizureDurationChange"
+                            placeholder="Describe any changes">
+                    </div>
+                    <div class="form-group">
+                        <label for="SeizureSeverityChange">
+                            <div class="label-line">
+                                <span data-i18n-key="question.seizureSeverityChange">Any new injuries because of
+                                    seizures?</span>
+                            </div>
+                            <!-- Removed inline Hindi translation; handled by i18n -->
+                        </label>
+                        <input type="text" id="SeizureSeverityChange" name="SeizureSeverityChange"
+                            placeholder="Describe any new injuries">
+                    </div>
+                </div>
+
+                <!-- Weight/Age Update Section -->
+                <div class="form-group"
+                    style="grid-column: 1 / -1; background: #f8f9fa; border-radius: 8px; padding: 16px; margin: 20px 0;">
+                    <label style="font-weight: 600; margin-bottom: 12px; display: block;">
+                        <!-- id updated to match script expectation while leaving the form field name unchanged -->
+                        <input type="checkbox" id="updateWeightAgeCheckbox" name="UpdateWeightAge"
+                            style="margin-right: 8px;">
+                        <span data-i18n-key="updateWeightAge.question">Update Patient's Age/Weight?</span>
+                    </label>
+
+                    <div id="updateWeightAgeFields"
+                        style="display: none; margin-top: 15px; padding-top: 15px; border-top: 1px solid #dee2e6;">
+                        <div class="form-group">
+                            <label for="CurrentWeight">
+                                <div class="label-line">
+                                    <span data-i18n-key="label.weight">Weight (kg)</span>
+                                    <span id="currentWeightDisplay" class="current-value"
+                                        style="font-weight: normal; color: #666; margin-left: 8px;"></span>
+                                </div>
+                            </label>
+                            <input type="number" id="CurrentWeight" name="CurrentWeight" step="0.1" min="0"
+                                placeholder="Enter weight in kg">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="CurrentAge">
+                                <div class="label-line">
+                                    <span data-i18n-key="label.ageYears">Age (years)</span>
+                                    <span id="currentAgeDisplay" class="current-value"
+                                        style="font-weight: normal; color: #666; margin-left: 8px;"></span>
+                                </div>
+                            </label>
+                            <input type="number" id="CurrentAge" name="CurrentAge" min="0" max="120"
+                                placeholder="Enter age in years">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="WeightAgeUpdateReason">
+                                <div class="label-line">
+                                    <span data-i18n-key="label.updateReason">Reason for update *</span>
+                                </div>
+                            </label>
+                            <input type="text" id="WeightAgeUpdateReason" name="WeightAgeUpdateReason"
+                                placeholder="Why are you updating these values?">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="WeightAgeUpdateNotes">
+                                <div class="label-line">
+                                    <span data-i18n-key="label.notes">Notes</span>
+                                </div>
+                            </label>
+                            <textarea id="WeightAgeUpdateNotes" name="WeightAgeUpdateNotes" rows="2"
+                                placeholder="Any additional notes about this update"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MedicationSource was moved below into the Medication & Health section so it appears after Treatment Adherence -->
+
+                <h3 class="form-section-header" data-i18n-key="medicationHealth.title">Medication & Health</h3>
+                <div class="form-group">
+                    <label for="treatmentAdherence">
+                        <div class="label-line">
+                            <span data-i18n-key="treatmentAdherence.question">What is the treatment adherence pattern?
+                                *</span>
+                        </div>
+                    </label>
+                    <select id="TreatmentAdherence" name="TreatmentAdherence" required>
+                        <option value="">Select Pattern</option>
+                        <option value="Always take">Always take</option>
+                        <option value="Occasionally miss">Occasionally miss</option>
+                        <option value="Frequently miss">Frequently miss</option>
+                        <option value="Completely stopped medicine">Completely stopped medicine</option>
+                    </select>
+                </div>
+
+                <!-- Medication Source: ask immediately after treatment adherence -->
+                <div class="form-group" style="grid-column: 1 / -1;" id="medicationSourceContainer">
+                    <label for="MedicationSource">
+                        <div class="label-line">
+                            <i class="fas fa-pills"></i>
+                            <span data-i18n-key="medicationSource.question">From where do you get medication? *</span>
+                        </div>
+                    </label>
+                    <select id="MedicationSource" name="MedicationSource" required>
+                        <option value="">Select Source</option>
+                        <option value="PHC">PHC</option>
+                        <option value="CHC">CHC</option>
+                        <option value="District Hospital">District Hospital</option>
+                        <option value="ASHA/CHOs">ASHA/CHOs</option>
+                        <option value="Private Pharmacy">Private Pharmacy</option>
+                    </select>
+                </div>
+
+                <div class="form-group" style="grid-column: 1 / -1;">
+                    <label>
+                        <div class="label-line">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <span data-i18n-key="sideEffects.reported">Reported Side Effects</span>
+                        </div>
+                    </label>
+                    <div id="adverseEffectsCheckboxes" class="side-effects-container"
+                        style="margin-top: 8px; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px;">
+                    </div>
+                    <div id="adverseEffectOtherContainer" style="margin-top: 10px; display: none;">
+                        <label for="adverseEffectOther"
+                            style="display: block; margin-bottom: 5px; font-size: 0.9em;">Please specify other side
+                            effects:</label>
+                        <input type="text" id="adverseEffectOther" class="form-control"
+                            placeholder="Enter other side effects">
+                    </div>
+                </div>
+
+                <!-- New Medical Conditions - placed BEFORE medication change decision -->
+                <div class="form-group">
+                    <label for="newMedicalConditions">
+                        <div class="label-line">
+                            <span data-i18n-key="newMedicalConditions.question">Any new medical conditions?</span>
+                        </div>
+                    </label>
+                    <input type="text" id="NewMedicalConditions" name="NewMedicalConditions"
+                        placeholder="Describe if any">
+                </div>
+
+                <!-- Structured Comorbidities for CDSS - placed BEFORE medication change decision -->
+                <div class="form-group" style="grid-column: 1 / -1;">
+                    <label>
+                        <div class="label-line">
+                            <span data-i18n-key="comorbidities.label">Known comorbidities / existing conditions</span>
+                            <span style="font-size: 0.75em; color: var(--primary-color); margin-left: 6px;">
+                                <i class="fas fa-info-circle"></i> For clinical guidance
+                            </span>
+                        </div>
+                    </label>
+                    <div id="comorbiditiesCheckboxes" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px; margin-top: 4px;">
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--light-bg); border-radius: 4px; cursor: pointer; font-size: 0.8em;">
+                            <input type="checkbox" name="comorbidity_diabetes" value="diabetes" style="width: 14px; height: 14px;">
+                            <span><i class="fas fa-tint" style="color: #3b82f6; width: 14px;"></i> Diabetes</span>
+                        </label>
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--light-bg); border-radius: 4px; cursor: pointer; font-size: 0.8em;">
+                            <input type="checkbox" name="comorbidity_hypertension" value="hypertension" style="width: 14px; height: 14px;">
+                            <span><i class="fas fa-heartbeat" style="color: #ef4444; width: 14px;"></i> Hypertension</span>
+                        </label>
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--light-bg); border-radius: 4px; cursor: pointer; font-size: 0.8em;">
+                            <input type="checkbox" name="comorbidity_cardiac" value="cardiac" style="width: 14px; height: 14px;">
+                            <span><i class="fas fa-heart" style="color: #dc2626; width: 14px;"></i> Heart Disease</span>
+                        </label>
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--light-bg); border-radius: 4px; cursor: pointer; font-size: 0.8em;">
+                            <input type="checkbox" name="comorbidity_ckd" value="ckd" style="width: 14px; height: 14px;">
+                            <span><i class="fas fa-kidneys" style="color: #8b5cf6; width: 14px;"></i> Kidney Disease</span>
+                        </label>
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--light-bg); border-radius: 4px; cursor: pointer; font-size: 0.8em;">
+                            <input type="checkbox" name="comorbidity_liver" value="liverDisease" style="width: 14px; height: 14px;">
+                            <span><i class="fas fa-flask" style="color: #f59e0b; width: 14px;"></i> Liver Disease</span>
+                        </label>
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--light-bg); border-radius: 4px; cursor: pointer; font-size: 0.8em;">
+                            <input type="checkbox" name="comorbidity_psychiatric" value="psychiatric" style="width: 14px; height: 14px;">
+                            <span><i class="fas fa-brain" style="color: #6366f1; width: 14px;"></i> Psychiatric</span>
+                        </label>
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--light-bg); border-radius: 4px; cursor: pointer; font-size: 0.8em;">
+                            <input type="checkbox" name="comorbidity_thyroid" value="thyroid" style="width: 14px; height: 14px;">
+                            <span><i class="fas fa-shield-virus" style="color: #14b8a6; width: 14px;"></i> Thyroid</span>
+                        </label>
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--light-bg); border-radius: 4px; cursor: pointer; font-size: 0.8em;">
+                            <input type="checkbox" name="comorbidity_osteoporosis" value="osteoporosis" style="width: 14px; height: 14px;">
+                            <span><i class="fas fa-bone" style="color: #78716c; width: 14px;"></i> Osteoporosis</span>
+                        </label>
+                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--light-bg); border-radius: 4px; cursor: pointer; font-size: 0.8em;">
+                            <input type="checkbox" name="comorbidity_obesity" value="obesity" style="width: 14px; height: 14px;">
+                            <span><i class="fas fa-weight" style="color: #f97316; width: 14px;"></i> Obesity</span>
+                        </label>
+                    </div>
+                    <!-- Hidden input to store the serialized comorbidities for form submission -->
+                    <input type="hidden" id="Comorbidities" name="Comorbidities" value="">
+                    <div style="margin-top: 4px;">
+                        <label for="comorbidityOther" style="font-size: 0.8em; color: var(--medium-text);">
+                            <i class="fas fa-plus-circle" style="color: var(--primary-color);"></i> Other conditions:
+                        </label>
+                        <input type="text" id="comorbidityOther" name="comorbidityOther" 
+                            placeholder="Any other conditions not listed above"
+                            style="margin-top: 2px; font-size: 0.85em;">
+                    </div>
+                </div>
+
+                <!-- Medication Change Toggle - placed AFTER comorbidities for clinical workflow -->
+                <div class="form-group" id="medicationChangeToggleContainer">
+                    <label for="medicationChanged">
+                        <div class="label-line">
+                            <input type="checkbox" id="MedicationChanged" name="MedicationChanged">
+                            <span data-i18n-key="medicationChange.question">Do you want to change the medicine?</span>
+                        </div>
+                    </label>
+                </div>
+
+                <div class="medication-change-section" id="medicationChangeSection">
+                    <!-- This will be populated dynamically by the streamlined interface -->
+                </div>
+
+                <!-- Standard Referral Section (for non-referred patients) -->
+                <div class="form-group" id="referralToMOContainer"
+                    style="grid-column: 1 / -1; background: #fff3cd; padding: 15px; border-radius: var(--border-radius); border-left: 4px solid var(--warning-color);">
+                    <label style="font-weight: 600; font-size: 1.1em; display:flex; align-items:center;">
+                        <input type="checkbox" id="ReferredToMO" name="ReferredToMO"
+                            style="width: 20px; height: 20px; margin-right: 10px;">
+                        <span data-i18n-key="referToMO.label">Refer to Medical Officer</span>
+                    </label>
+                    <small style="color: var(--dark-text); margin-top: 5px; display: block;">
+                        Check this box if the patient has not benefited from the current treatment or has severe side
+                        effects.
+                    </small>
+                    <div id="referralReasonContainer" style="display: none; margin-top: 12px;">
+                        <label for="ReferralReasonDropdown" style="font-weight: 600; display: block; margin-bottom: 6px;">
+                            <i class="fas fa-list" style="margin-right: 6px;"></i>
+                            <span data-i18n-key="followup.referralReason">Reason for Referral</span>
+                        </label>
+                        <select id="ReferralReasonDropdown" class="form-control" style="width: 100%;">
+                            <option value="">Select a reason</option>
+                            <option value="Seizures not controlled">Seizures not controlled</option>
+                            <option value="Experiencing severe side effects">Experiencing severe side effects</option>
+                            <option value="Patient wants referral">Patient wants referral</option>
+                            <option value="Planning pregnancy or is pregnant">Planning pregnancy / is pregnant</option>
+                            <option value="Poor adherence despite counselling">Poor adherence despite counselling</option>
+                            <option value="other">Other (specify)</option>
+                        </select>
+                        <div id="referralReasonOtherGroup" style="display: none; margin-top: 8px;">
+                            <label for="ReferralReasonOther" style="font-size: 0.9em; color: var(--medium-text);">
+                                Please describe the reason
+                            </label>
+                            <input type="text" id="ReferralReasonOther" class="form-control"
+                                placeholder="Type the referral reason" />
+                        </div>
+                        <input type="hidden" id="ReferralReason" name="ReferralReason" value="">
+                    </div>
+                </div>
+
+                <!-- Referral Actions Section (for already-referred patients - visible to MO/Master Admin) -->
+                <div class="form-group" id="referredPatientActionsContainer"
+                    style="grid-column: 1 / -1; background: #e8f4fd; padding: 20px; border-radius: var(--border-radius); border-left: 4px solid var(--primary-color); display: none;">
+                    <div style="margin-bottom: 15px;">
+                        <h4
+                            style="margin: 0 0 8px 0; color: var(--secondary-color); display: flex; align-items: center;">
+                            <i class="fas fa-user-md" style="margin-right: 10px; color: var(--primary-color);"></i>
+                            <span data-i18n-key="referral.actionsTitle">Referral Management</span>
+                        </h4>
+                        <small style="color: var(--medium-text);" data-i18n-key="referral.actionsDescription">
+                            This patient is currently referred. Choose an action below:
+                        </small>
+                    </div>
+                    <div id="referralReasonBanner" style="display:none; margin-bottom: 12px; padding: 12px; border-radius: 6px; background: #fff8e1; border: 1px solid #ffe0b2; color: #8d6e63;">
+                        <strong><i class="fas fa-info-circle" style="margin-right: 6px;"></i>This patient was referred because:</strong>
+                        <span id="referralReasonBannerText"></span>
+                    </div>
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                        <!-- Refer to Tertiary Care Button -->
+                        <button type="button" id="referToTertiaryBtn" class="btn"
+                            style="background: linear-gradient(135deg, #dc3545, #c82333); color: white; padding: 12px 20px; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-weight: 600; border: none; cursor: pointer; box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);">
+                            <i class="fas fa-hospital"></i>
+                            <span data-i18n-key="referral.toTertiary">Refer to Tertiary Care</span>
+                        </button>
+                        <!-- Return to PHC/Facility Button -->
+                        <button type="button" id="returnToFacilityBtn" class="btn"
+                            style="background: linear-gradient(135deg, #28a745, #218838); color: white; padding: 12px 20px; border-radius: 8px; display: flex; align-items: center; gap: 8px; font-weight: 600; border: none; cursor: pointer; box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);">
+                            <i class="fas fa-clinic-medical"></i>
+                            <span data-i18n-key="referral.returnToFacility">Return to Primary Care Facility</span>
+                        </button>
+                    </div>
+                    <!-- Referral notes hidden - not needed for current workflow -->
+                    <div id="referralActionNotes" style="margin-top: 15px; display: none;">
+                        <label for="ReferralActionNotes" style="font-weight: 600; margin-bottom: 8px; display: block;">
+                            <i class="fas fa-sticky-note" style="margin-right: 5px;"></i>
+                            <span data-i18n-key="referral.notesLabel">Notes for referral action (optional)</span>
+                        </label>
+                        <textarea id="ReferralActionNotes" name="ReferralActionNotes" rows="2"
+                            style="width: 100%; padding: 10px; border: 1px solid #dee2e6; border-radius: 6px;"
+                            placeholder="Add any notes about this referral decision..."></textarea>
+                    </div>
+                    <!-- Hidden fields to track referral action -->
+                    <input type="hidden" id="ReferralAction" name="ReferralAction" value="">
+                </div>
+
+                <div class="form-group" style="grid-column: 1 / -1;">
+                    <label for="additionalQuestions">
+                        <div class="label-line">
+                            <span data-i18n-key="additionalQuestions.label">Any other health related problems that the patient has shared/ Any other notes?</span>
+                        </div>
+                    </label>
+                    <textarea id="AdditionalQuestions" name="AdditionalQuestions" rows="3"
+                        placeholder="Any other questions from the patient or remarks..."></textarea>
+                </div>
+
+                <button type="submit" id="followUpFormSubmitBtn" class="btn btn-primary" style="grid-column: 1 / -1;">
+                    <i class="fas fa-save"></i> Submit Follow-up
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div id="injury-modal" style="display:none;">
+        <div class="injury-modal-content">
+            <button class="modal-close" id="closeInjuryModalBtn">&times;</button>
+            <h4 id="injury-modal-title">Select Injury Type</h4>
+            <div class="injury-type-options" style="margin-top: 20px;">
+                <button class="btn btn-secondary" data-type="Burns">Burns</button>
+                <button class="btn btn-secondary" data-type="Soft Tissue">Soft Tissue Injury</button>
+                <button class="btn btn-secondary" data-type="Fracture">Fracture</button>
+                <button class="btn btn-secondary" data-type="Multiple">Multiple</button>
+                <button class="btn btn-danger" style="margin-top: 10px;" id="cancel-injury-selection">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ReferralFollowUpModal and all legacy checklist code removed: all handled in unified followUpModal -->
+
+    <!-- Drug Information Modal -->
+    <div id="drugInfoModal" class="loading-indicator" style="display: none; z-index: 60000;">
+        <div class="modal-content" style="max-width: 600px;">
+            <button class="modal-close" onclick="closeDrugInfoModal()">&times;</button>
+            <h4 id="drugInfoModalTitle">Drug Information</h4>
+            <div id="drugInfoModalBody">
+                <!-- Drug information content will be populated here -->
+            </div>
+        </div>
+    </div>
+    <!-- Clinical Decision Support System -->
+    <!-- Load configuration first -->
+    <!-- advancedAnalytics.js is now lazy-loaded when Reports tab is opened -->
+    <!-- globals.js is now loaded earlier in the head section -->
+    <!-- Load CDS API dependencies -->
+    <script defer src="js/api/cds-api.js"></script>
+    <script defer src="js/telemetry/cds-telemetry.js"></script>
+    <!-- Load CDS core modules -->
+    <!-- v1.2: Dose Adequacy Highlighting Module (load before script.js) -->
+    <script defer src="js/dose-adequacy.js"></script>
+    <script defer src="js/cds/governance.js"></script>
+    <script defer src="js/cds/integration.js"></script>
+    <script defer src="js/cds/ui-components.js"></script>
+    <!-- Initialize CDS Version Manager -->
+    <script defer src="js/cds/version-manager.js"></script>
+    <!-- Load security module before main scripts -->
+    <script defer src="js/security.js"></script>
+    <!-- Load main scripts after all dependencies -->
+    <script defer src="js/followup.js"></script>
+    <script defer src="js/performance-optimizations.js"></script>
+    <script defer src="js/draft.js"></script>
+    <script defer src="script.js"></script>
+
+    <!-- Toast notification element -->
+    <div id="toast" class="toast" style="display: none;"></div>
+
+    <!-- Seizure Classifier Modal -->
+    <div id="seizureClassifierModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 600px; max-height: 90vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">
+                    <i class="fas fa-brain" style="margin-right: 8px;"></i>
+                    <span data-i18n-key="modal.seizureClassification">Seizure Classification</span>
+                </h3>
+                <button class="modal-close" onclick="closeModal('seizureClassifierModal')"
+                    style="font-size: 1.5rem; border: none; background: none; cursor: pointer;">&times;</button>
+            </div>
+            <p style="color: var(--medium-text); margin-bottom: 20px;" data-i18n-key="modal.seizureClassificationDesc">
+                Use the ILAE 2017 classification system to identify the seizure type based on clinical features.
+            </p>
+            <div id="seizureClassifierContainer">
+                <!-- Questionnaire will be rendered here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Seizure Video Upload Modal (for follow-up tab) -->
+    <div id="seizureVideoModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0;">
+                    <i class="fas fa-video" style="margin-right: 8px;"></i>
+                    <span data-i18n-key="modal.seizureVideo">Seizure Video Upload</span>
+                </h3>
+                <button class="modal-close" onclick="closeModal('seizureVideoModal')"
+                    style="font-size: 1.5rem; border: none; background: none; cursor: pointer;">&times;</button>
+            </div>
+            <div id="seizureVideoSection">
+                <!-- Video upload interface will be rendered here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Patient Detail Modal -->
+    <div id="patientDetailModal" class="loading-indicator">
+        <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto;">
+            <button class="modal-close" onclick="closePatientDetailModal()">&times;</button>
+            <div id="patientDetailContent">
+                <!-- Patient details will be populated here -->
+            </div>
+            <div style="text-align: right; margin-top: 20px; padding-top: 20px; border-top: 1px solid #e1e5e9;">
+                <button id="printPatientSummaryBtn" class="btn btn-secondary" onclick="printPatientSummary()">
+                    <i class="fas fa-print"></i> Print Summary
+                </button>
+                <button class="btn btn-danger" onclick="closePatientDetailModal()" style="margin-left: 10px;">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Seizure Classification Helper Modal (Inline Interactive) -->
+    <div id="seizureClassificationHelperModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 700px; max-height: 90vh; overflow-y: auto;">
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #0066cc; padding-bottom: 15px;">
+                <h3 style="margin: 0; color: #0066cc;">
+                    <i class="fas fa-brain" style="margin-right: 10px;"></i>
+                    <span data-i18n-key="modal.seizureClassificationHelper">Seizure Classification Helper</span>
+                </h3>
+                <button class="modal-close" onclick="closeSeizureClassificationHelper()"
+                    style="font-size: 1.5rem; border: none; background: none; cursor: pointer;">&times;</button>
+            </div>
+
+            <div id="seizureHelperContent" style="padding: 20px 0;">
+                <!-- Questions will be rendered here -->
+            </div>
+
+            <div
+                style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #e1e5e9; display: flex; gap: 10px; justify-content: flex-end;">
+                <button type="button" class="btn btn-secondary" id="helperPrevBtn" onclick="previousHelperQuestion()"
+                    style="display: none;" data-i18n-key="button.previous">
+                    <i class="fas fa-arrow-left"></i> <span data-i18n-key="button.previous">Previous</span>
+                </button>
+                <button type="button" class="btn btn-primary" id="helperNextBtn" onclick="nextHelperQuestion()"
+                    data-i18n-key="button.next">
+                    <span data-i18n-key="button.next">Next</span> <i class="fas fa-arrow-right"></i>
+                </button>
+                <button type="button" class="btn btn-success" id="helperFinishBtn"
+                    onclick="finishSeizureClassificationHelper()" style="display: none;"
+                    data-i18n-key="button.confirmAndClose">
+                    <i class="fas fa-check"></i> <span data-i18n-key="button.confirmAndClose">Confirm & Close</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Teleconsultation Scheduler Modal -->
+    <div id="teleconsultModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 650px; max-height: 90vh; overflow-y: auto;">
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid var(--primary-color); padding-bottom: 15px;">
+                <h3 style="margin: 0; color: var(--primary-color);">
+                    <i class="fas fa-video" style="margin-right: 10px;"></i>
+                    Video Consultation
+                </h3>
+                <button class="modal-close" onclick="closeModal('teleconsultModal')"
+                    style="font-size: 1.5rem; border: none; background: none; cursor: pointer;">&times;</button>
+            </div>
+
+            <div id="teleconsultSchedulerContainer">
+                <!-- Teleconsultation scheduler will be rendered here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Consultation History Modal -->
+    <div id="consultationHistoryModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 850px; max-height: 90vh; overflow-y: auto;">
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid var(--primary-color); padding-bottom: 15px;">
+                <h3 style="margin: 0; color: var(--primary-color);">
+                    <i class="fas fa-history" style="margin-right: 10px;"></i>
+                    Consultation History
+                </h3>
+                <button class="modal-close" onclick="closeModal('consultationHistoryModal')"
+                    style="font-size: 1.5rem; border: none; background: none; cursor: pointer;">&times;</button>
+            </div>
+
+            <div id="consultationHistoryContent">
+                <!-- Consultation history will be rendered here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Teleconsultation Panel (Sidebar during video call) -->
+    <div id="teleconsultationPanel" style="display: none;">
+        <div id="teleconsultationSummary">
+            <!-- Patient summary for teleconsultation will be rendered here -->
+        </div>
+    </div>
+
+</body>
+
+</html>
